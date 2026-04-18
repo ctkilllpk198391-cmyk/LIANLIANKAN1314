@@ -32,12 +32,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller==6.11.1 appdirs setuptools
           pip install fastapi pydantic aiohttp httpx sqlalchemy aiosqlite python-dotenv pyyaml humancursor pywin32 uiautomation
-          # 多 wxauto 引擎 fallback (优先级: wxautox4 > wxauto4 > wxautox > wxauto)
-          # 任一装上即可,失败的引擎 client 启动时自动 fallback
-          pip install wxautox4 || Write-Host "wxautox4 install failed (skipped)"
-          pip install wxauto4 || Write-Host "wxauto4 install failed (skipped)"
-          pip install wxautox || Write-Host "wxautox install failed (skipped)"
-          pip install wxauto || Write-Host "wxauto install failed (skipped)"
+          # 多 wxauto 引擎 fallback · 任一装上即可
+          # PowerShell 不支持 bash 的 ||,用 LASTEXITCODE 重置避免 step fail
+          foreach ($pkg in 'wxautox4', 'wxauto4', 'wxautox', 'wxauto') {
+              pip install $pkg
+              if ($LASTEXITCODE -eq 0) { Write-Host "✓ $pkg OK" } else { Write-Host "✗ $pkg SKIP (no wheel for Python 3.11 or pkg not on pypi)" }
+              $global:LASTEXITCODE = 0
+          }
 
       - name: Verify imports work on Windows
         shell: pwsh
