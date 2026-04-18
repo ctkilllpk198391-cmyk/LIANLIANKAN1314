@@ -1,30 +1,63 @@
 """客户端主入口 · 串联 watcher → review_popup → sender。
 
-用法：
+用法:
   python -m client.main --tenant tenant_0001 --server http://127.0.0.1:8327
   python -m client.main --tenant tenant_0001 --mock      # macOS 调试模式
+  python -m client.main --diagnose                       # 输出环境诊断报告
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
+import os
 import platform
 import sys
+import traceback
+from datetime import datetime
+from pathlib import Path
 
-# Force unbuffered stdout/stderr (Windows cmd + PyInstaller --onefile)
+# === stdout 强制 unbuffered + UTF-8 (Windows cmd + PyInstaller --onefile 防黑屏) ===
 try:
     sys.stdout.reconfigure(line_buffering=True, encoding='utf-8')  # type: ignore
     sys.stderr.reconfigure(line_buffering=True, encoding='utf-8')  # type: ignore
 except Exception:
     pass
 
-# Boot banner so user sees something immediately (before PyInstaller --onefile slow start finishes)
+# === 强制文件日志(永远会写,console 黑屏也能看)===
+def _setup_log_dir() -> Path:
+    """日志目录:Windows 用 LocalAppData,其他平台用 home。"""
+    if sys.platform == 'win32':
+        base = Path(os.environ.get('LOCALAPPDATA', os.environ.get('TEMP', '.')))
+    else:
+        base = Path.home()
+    log_dir = base / 'WechatAgent' / 'logs'
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir
+
+LOG_DIR = _setup_log_dir()
+LOG_FILE = LOG_DIR / f'client-{datetime.now().strftime("%Y%m%d")}.log'
+
+# 立即往文件写一行,验证可写
+try:
+    with open(LOG_FILE, 'a', encoding='utf-8') as f:
+        f.write(f"\n{'=' * 60}\n")
+        f.write(f"  wechat_agent client booting at {datetime.now().isoformat()}\n")
+        f.write(f"  Python: {sys.version}\n")
+        f.write(f"  Platform: {platform.platform()}\n")
+        f.write(f"  Args: {sys.argv[1:]}\n")
+        f.write(f"  Log file: {LOG_FILE}\n")
+        f.write(f"{'=' * 60}\n")
+except Exception as e:
+    print(f"WARN: cannot write log file {LOG_FILE}: {e}", flush=True)
+
+# Boot banner (console)
 print("=" * 60, flush=True)
 print("  wechat_agent client booting...", flush=True)
-print("  (first launch may take 1-3 min due to Windows Defender)", flush=True)
-print("  (subsequent launches are ~10x faster)", flush=True)
+print(f"  Log: {LOG_FILE}", flush=True)
+print("  (first launch may take 1-3 min · Windows Defender)", flush=True)
 print("=" * 60, flush=True)
 print(f"  Python: {sys.version.split()[0]}", flush=True)
 print(f"  Args: {' '.join(sys.argv[1:])}", flush=True)
@@ -39,12 +72,17 @@ from client.watcher import WeChatWatcher
 from shared.proto import ReviewDecision, SendAck, Suggestion
 from shared.types import ReviewDecisionEnum
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    stream=sys.stdout,  # 默认 stderr,改 stdout 与 boot banner 同流向 + 易刷
-    force=True,
-)
+# 双 handler · console + file 都写
+_log_fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+_console_handler = logging.StreamHandler(sys.stdout)
+_console_handler.setFormatter(_log_fmt)
+_file_handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
+_file_handler.setFormatter(_log_fmt)
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.INFO)
+_root_logger.handlers.clear()
+_root_logger.addHandler(_console_handler)
+_root_logger.addHandler(_file_handler)
 logger = logging.getLogger("baiyang.client")
 
 
@@ -143,20 +181,120 @@ class ClientApp:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="baiyang-client")
-    p.add_argument("--tenant", required=True, help="tenant_id (如 tenant_0001)")
-    p.add_argument("--server", default="http://127.0.0.1:8327", help="server URL")
+    p.add_argument("--tenant", default="tenant_0001", help="tenant_id (如 tenant_0001)")
+    p.add_argument("--server", default="http://120.26.208.212", help="server URL")
     p.add_argument("--mock", action="store_true", help="mock 模式 · macOS 调试")
     p.add_argument("--auto-accept", action="store_true", help="无人值守自动 accept (仅测试)")
     p.add_argument("--check-only", action="store_true",
                    help="只跑 server health + 微信版本探测,验证后退出(CI smoke test 用)")
+    p.add_argument("--diagnose", action="store_true",
+                   help="输出完整环境诊断报告(Windows/微信/wxauto引擎/server/.env),不启动服务")
     return p.parse_args()
+
+
+def run_diagnose() -> None:
+    """完整环境诊断 · 输出 JSON 到 console + log 文件 + 桌面 wxagent_diagnose.json"""
+    report: dict = {
+        "timestamp": datetime.now().isoformat(),
+        "system": {
+            "platform": platform.platform(),
+            "python": sys.version,
+            "executable": sys.executable,
+            "frozen": getattr(sys, 'frozen', False),
+        },
+        "args": sys.argv[1:],
+        "log_dir": str(LOG_DIR),
+        "log_file": str(LOG_FILE),
+        "engines": {},
+        "wechat_version": None,
+        "server_health": None,
+        "env_file": None,
+    }
+    # 引擎探测
+    for name in ['wxautox4', 'wxauto4', 'wxautox', 'wxauto', 'uiautomation', 'win32api', 'humancursor']:
+        try:
+            mod = __import__(name)
+            ver = getattr(mod, '__version__', 'unknown')
+            report["engines"][name] = {"installed": True, "version": str(ver)}
+        except ImportError as e:
+            report["engines"][name] = {"installed": False, "error": str(e)}
+        except Exception as e:
+            report["engines"][name] = {"installed": "?", "error": f"{type(e).__name__}: {e}"}
+    # 微信版本
+    try:
+        from client.version_probe import detect_wechat_version
+        report["wechat_version"] = detect_wechat_version()
+    except Exception as e:
+        report["wechat_version"] = f"探测失败: {e}"
+    # server health
+    try:
+        import urllib.request
+        import urllib.error
+        url = "http://120.26.208.212/v1/health"
+        with urllib.request.urlopen(url, timeout=10) as r:
+            report["server_health"] = json.loads(r.read().decode('utf-8'))
+    except Exception as e:
+        report["server_health"] = f"server 不可达: {type(e).__name__}: {e}"
+    # .env 文件
+    env_candidates = [
+        Path(sys.executable).parent / '.env',
+        LOG_DIR.parent / '.env',
+    ]
+    for cand in env_candidates:
+        if cand.exists():
+            try:
+                report["env_file"] = {"path": str(cand), "content": cand.read_text(encoding='utf-8')}
+            except Exception as e:
+                report["env_file"] = {"path": str(cand), "error": str(e)}
+            break
+    # 输出
+    output = json.dumps(report, ensure_ascii=False, indent=2)
+    print(output, flush=True)
+    # 写桌面
+    try:
+        if sys.platform == 'win32':
+            desktop = Path(os.environ.get('USERPROFILE', '.')) / 'Desktop'
+        else:
+            desktop = Path.home() / 'Desktop'
+        report_file = desktop / f'wxagent_diagnose_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
+        report_file.write_text(output, encoding='utf-8')
+        print(f"\n诊断报告已写入: {report_file}", flush=True)
+    except Exception as e:
+        print(f"WARN: 无法写桌面诊断: {e}", flush=True)
+    # 写 log
+    try:
+        with open(LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write("\n=== DIAGNOSE ===\n")
+            f.write(output)
+            f.write("\n")
+    except Exception:
+        pass
 
 
 def main() -> None:
     args = parse_args()
+
+    # --diagnose 模式:输出环境报告后退出
+    if args.diagnose:
+        run_diagnose()
+        return
+
     if not args.mock and platform.system() != "Windows":
         logger.warning("非 Windows 环境，强制启用 --mock")
         args.mock = True
+
+    # 全局未捕获异常 → 写日志 + 桌面 crash report
+    def _excepthook(exc_type, exc_value, exc_tb):
+        tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        logger.critical("未捕获异常:\n%s", tb)
+        try:
+            desktop = Path(os.environ.get('USERPROFILE', '.')) / 'Desktop'
+            crash_file = desktop / f'wxagent_crash_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
+            crash_file.write_text(f"crash at {datetime.now()}\n\n{tb}", encoding='utf-8')
+            print(f"\n崩溃报告: {crash_file}", flush=True)
+        except Exception:
+            pass
+    sys.excepthook = _excepthook
 
     app = ClientApp(
         server_url=args.server,

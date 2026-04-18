@@ -23,12 +23,22 @@ class HumanLikeSender:
         if self.mock:
             return
         if self._wx is None:
-            WeChat = None
-            try:
-                from wxautox import WeChat  # type: ignore
-            except ImportError:
-                from wxauto import WeChat  # type: ignore
-            self._wx = WeChat()
+            engines = ['wxautox4', 'wxauto4', 'wxautox', 'wxauto']
+            for mod_name in engines:
+                try:
+                    mod = __import__(mod_name)
+                    WeChatCls = getattr(mod, 'WeChat', None)
+                    if WeChatCls is None:
+                        continue
+                    self._wx = WeChatCls()
+                    logger.info("sender 使用引擎: %s", mod_name)
+                    break
+                except ImportError:
+                    continue
+                except Exception as e:
+                    logger.warning("sender 引擎 %s 失败: %s", mod_name, e)
+            if self._wx is None:
+                raise RuntimeError("sender: 所有微信引擎都不可用")
         if self._cursor is None:
             try:
                 from humancursor import SystemCursor  # type: ignore

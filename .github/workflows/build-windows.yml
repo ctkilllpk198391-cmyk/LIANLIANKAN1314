@@ -31,13 +31,25 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller==6.11.1 appdirs setuptools
-          pip install fastapi pydantic aiohttp httpx sqlalchemy aiosqlite python-dotenv pyyaml humancursor wxautox pywin32
+          pip install fastapi pydantic aiohttp httpx sqlalchemy aiosqlite python-dotenv pyyaml humancursor pywin32 uiautomation
+          # 多 wxauto 引擎 fallback (优先级: wxautox4 > wxauto4 > wxautox > wxauto)
+          # 任一装上即可,失败的引擎 client 启动时自动 fallback
+          pip install wxautox4 || Write-Host "wxautox4 install failed (skipped)"
+          pip install wxauto4 || Write-Host "wxauto4 install failed (skipped)"
+          pip install wxautox || Write-Host "wxautox install failed (skipped)"
+          pip install wxauto || Write-Host "wxauto install failed (skipped)"
 
       - name: Verify imports work on Windows
         shell: pwsh
         run: |
           python -c "import client.main; print('client.main import OK')"
-          python -c "from wxautox import WeChat; print('wxautox import OK')"
+          python -c "
+          for name in ['wxautox4', 'wxauto4', 'wxautox', 'wxauto', 'uiautomation']:
+              try:
+                  __import__(name); print(f'{name}: OK')
+              except ImportError as e:
+                  print(f'{name}: MISSING ({e})')
+          "
 
       - name: Build EXE with PyInstaller
         shell: pwsh

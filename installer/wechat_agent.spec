@@ -31,14 +31,20 @@ for pkg in [
     except Exception as e:
         print(f"[spec] WARN: collect_all({pkg}) failed: {e}")
 
-# wxautox + pywin32 只在 Windows 收集(macOS dry-run 时跳过)
+# wxauto 系列 + pywin32 + uiautomation 只在 Windows 收集
 if sys.platform == 'win32':
-    for pkg in ['wxautox', 'win32api', 'win32con', 'win32gui', 'pywintypes']:
+    win_pkgs = [
+        'wxautox4', 'wxauto4', 'wxautox', 'wxauto',  # 4 个引擎都打包,运行时 fallback
+        'uiautomation',  # 微信 4.1 直接控件树访问
+        'win32api', 'win32con', 'win32gui', 'pywintypes', 'comtypes',
+    ]
+    for pkg in win_pkgs:
         try:
             d, b, h = collect_all(pkg)
             datas += d
             binaries += b
             hiddenimports += h
+            print(f"[spec] OK collect_all({pkg})")
         except Exception as e:
             print(f"[spec] WARN: collect_all({pkg}) failed: {e}")
 

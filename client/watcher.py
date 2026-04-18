@@ -35,21 +35,41 @@ class WeChatWatcher:
         if self.mock:
             return
         if self._wx is None:
-            WeChat = None
-            try:
-                from wxautox import WeChat  # type: ignore  # 商业 Plus 版优先
-                logger.info("使用 wxautox (Plus)")
-            except ImportError:
+            # 多引擎 fallback (按微信版本优先级):
+            # wxautox4 = 商业 Plus 版 for 微信 4.0+(最新)
+            # wxauto4 = 开源 for 微信 4.0
+            # wxautox = 商业 Plus 版 for 微信 3.x
+            # wxauto = 开源 for 微信 3.x
+            engines = [
+                ('wxautox4', '商业 Plus · 微信 4.x'),
+                ('wxauto4',  '开源 · 微信 4.x'),
+                ('wxautox',  '商业 Plus · 微信 3.x'),
+                ('wxauto',   '开源 · 微信 3.x'),
+            ]
+            last_err = None
+            for mod_name, desc in engines:
                 try:
-                    from wxauto import WeChat  # type: ignore  # 开源 fallback
-                    logger.info("使用 wxauto (开源版)")
+                    mod = __import__(mod_name)
+                    WeChatCls = getattr(mod, 'WeChat', None)
+                    if WeChatCls is None:
+                        logger.warning("引擎 %s 没有 WeChat 类,跳过", mod_name)
+                        continue
+                    logger.info("尝试引擎: %s (%s)", mod_name, desc)
+                    self._wx = WeChatCls()
+                    self._engine_name = mod_name
+                    logger.info("✅ 微信自动化引擎激活: %s", mod_name)
+                    return
                 except ImportError as e:
-                    raise RuntimeError(
-                        "wxauto/wxautox 未安装。Windows: pip install wxautox。"
-                        "macOS/Linux: 仅 mock 模式可用（设 mock=True）"
-                    ) from e
-            self._wx = WeChat()
-            logger.info("微信自动化模块初始化完成")
+                    logger.info("引擎 %s 未安装: %s", mod_name, e)
+                    last_err = e
+                except Exception as e:
+                    logger.warning("引擎 %s 初始化失败: %s", mod_name, e)
+                    last_err = e
+            raise RuntimeError(
+                "所有微信自动化引擎都不可用。已尝试: " +
+                ", ".join(m for m, _ in engines) +
+                f" · 最后错误: {last_err}"
+            )
 
     async def start(self) -> None:
         self._ensure_wx()
