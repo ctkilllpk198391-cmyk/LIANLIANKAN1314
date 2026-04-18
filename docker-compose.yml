@@ -1,0 +1,44 @@
+version: "3.9"
+
+# 白羊 production-ready stack: server + postgres + 监控
+# 用法: docker compose up -d
+
+services:
+  baiyang-server:
+    build: .
+    image: baiyang/server:0.1.0
+    container_name: baiyang-server
+    ports:
+      - "8327:8327"
+    environment:
+      - BAIYANG_DB_URL=postgresql+asyncpg://baiyang:${POSTGRES_PASSWORD:-changeme}@postgres:5432/hermes_baiyang
+      - BAIYANG_HERMES_URL=http://hermes-agent:8317
+      - BAIYANG_HERMES_MOCK=${BAIYANG_HERMES_MOCK:-true}
+      - BAIYANG_TENANTS_PATH=/app/config/tenants.yaml
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: baiyang-postgres
+    environment:
+      - POSTGRES_USER=baiyang
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_DB=hermes_baiyang
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U baiyang"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pg_data:

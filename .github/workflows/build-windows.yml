@@ -1,0 +1,81 @@
+name: Build Windows Setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional release tag (e.g. v0.1.0). Empty = artifact only.'
+        required: false
+        default: ''
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller==6.11.1 appdirs setuptools
+          pip install fastapi pydantic aiohttp httpx sqlalchemy aiosqlite python-dotenv pyyaml humancursor wxautox pywin32
+
+      - name: Verify imports work on Windows
+        shell: pwsh
+        run: |
+          python -c "import client.main; print('client.main import OK')"
+          python -c "from wxautox import WeChat; print('wxautox import OK')"
+
+      - name: Build EXE with PyInstaller
+        shell: pwsh
+        run: |
+          pyinstaller installer/wechat_agent.spec --clean --noconfirm
+          if (-not (Test-Path "dist/wechat_agent.exe")) {
+            Write-Error "PyInstaller did not produce dist/wechat_agent.exe"
+            exit 1
+          }
+          Write-Host "EXE size:"
+          (Get-Item "dist/wechat_agent.exe").Length / 1MB
+
+      - name: Install Inno Setup via Chocolatey
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+
+      - name: Build Setup.exe with Inno Setup
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" installer/setup.iss
+          if (-not (Test-Path "dist/WechatAgent-Setup.exe")) {
+            Write-Error "Inno Setup did not produce WechatAgent-Setup.exe"
+            exit 1
+          }
+          Write-Host "Setup size:"
+          (Get-Item "dist/WechatAgent-Setup.exe").Length / 1MB
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WechatAgent-Setup
+          path: dist/WechatAgent-Setup.exe
+          retention-days: 30
+
+      - name: Create GitHub Release (on tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/WechatAgent-Setup.exe
+          generate_release_notes: true

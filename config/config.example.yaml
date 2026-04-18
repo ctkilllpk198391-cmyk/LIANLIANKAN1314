@@ -1,0 +1,53 @@
+# 白羊 wechat_agent · 配置示例
+# 复制为 config.yaml 后按需修改
+
+server:
+  host: 0.0.0.0
+  port: 8327
+
+database:
+  driver: sqlite
+  url: sqlite+aiosqlite:///./data/wechat_agent.db
+  # Phase 2 升 PostgreSQL:
+  # driver: postgres
+  # url: postgresql+asyncpg://baiyang:secret@localhost/hermes_baiyang
+
+llm:
+  # 2026-04-15 升级 · 直接调 API · 无需 hermes-agent
+  default_route: deepseek_v32       # 90% 走这个
+  high_risk_route: glm_51           # 高风险走 GLM-5.1（中文当前第一）
+  lora_route: local_vllm            # Phase 7+ 客户专属 LoRA
+  mock: true                        # 没 API key 时设 true · 有 key 设 false
+  timeout_sec: 30
+  retry_count: 3
+  max_tokens: 300
+  temperature: 0.7
+
+# Hermes-agent 桥接（保留 · 向后兼容）· 现已不主用
+hermes:
+  base_url: http://127.0.0.1:8317
+  mock: true
+
+risk_control:
+  daily_quota_default: 30
+  daily_quota_seasoned: 100
+  daily_quota_max: 150
+  dedup_window_days: 7
+  dedup_threshold: 0.6
+  workhour_start: "09:00"
+  workhour_end: "21:00"
+  heartbeat_min_hours: 9
+  heartbeat_max_hours: 11
+
+audit:
+  retention_days: 365
+  log_to_file: ./logs/audit.jsonl
+
+llm:
+  classifier_mode: rule    # rule | llm | hybrid (Phase 3)
+  generator_max_tokens: 300
+  generator_temp: 0.7
+
+logging:
+  level: INFO
+  format: structlog

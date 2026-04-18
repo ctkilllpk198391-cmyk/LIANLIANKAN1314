@@ -1,0 +1,51 @@
+groups:
+  - name: baiyang_critical
+    rules:
+      - alert: ServerDown
+        expr: up{job="baiyang-server"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "白羊 server 宕机 > 2 分钟"
+          description: "立即检查 systemctl status baiyang-server"
+
+      - alert: VLLMDown
+        expr: up{job="vllm"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "vLLM 推理服务挂"
+
+      - alert: HighGenerationLatency
+        expr: histogram_quantile(0.95, baiyang_generation_latency_seconds_bucket) > 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "回复生成 p95 > 3s · 影响客户体验"
+
+      - alert: AcceptanceRateDrop
+        expr: avg_over_time(baiyang_acceptance_rate[1h]) < 0.5
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "采纳率低于 50% 持续 1 小时 · 检查 LoRA 是否漂移"
+
+      - alert: ForbiddenWordHit
+        expr: increase(baiyang_forbidden_word_blocked_total[1h]) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "1 小时内禁用词触发 > 5 次 · 检查 LoRA 训练数据"
+
+      - alert: TenantQuotaExhausted
+        expr: baiyang_tenant_quota_remaining == 0
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "{{ $labels.tenant_id }} 配额耗尽 · 等明天重置"

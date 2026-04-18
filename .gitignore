@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.installed.cfg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Type checking
+.mypy_cache/
+.ruff_cache/
+
+# Secrets · 永不提交
+.env
+.env.*
+!.env.example
+config/config.yaml
+config/tenants.yaml
+*.pem
+*.key
+*.crt
+secrets/
+
+# T4 · TenantKMS key 目录
+.wechat_agent_keys/
+
+# Data · 客户隐私
+data/
+*.db
+*.sqlite
+*.sqlite3
+logs/
+audit/
+chat_exports/
+
+# 模型权重
+models/*/lora.bin
+models/*/checkpoint-*
+models/cache/
+*.safetensors
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# 备份
+*.bak
+*.orig
+*~

@@ -1,0 +1,36 @@
+# 白羊 Prometheus 抓取配置
+# Phase 4 部署：cd monitoring && docker compose up -d
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    project: baiyang
+    env: prod
+
+scrape_configs:
+  - job_name: baiyang-server
+    static_configs:
+      - targets: ['baiyang-server:8327']
+    metrics_path: /metrics
+
+  - job_name: vllm
+    static_configs:
+      - targets: ['vllm:8000']
+    metrics_path: /metrics
+
+  - job_name: node-exporter
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  - job_name: postgres-exporter
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
+rule_files:
+  - alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']

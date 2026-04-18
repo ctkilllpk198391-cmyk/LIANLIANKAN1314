@@ -1,0 +1,118 @@
+version: "3.9"
+
+# 白羊生产环境 · server + postgres + redis + nginx
+# 用法: docker compose -f deploy/docker-compose.prod.yml up -d
+
+networks:
+  baiyang-net:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
+  certbot-conf:
+  certbot-www:
+  static-html:
+
+services:
+
+  # ─── 应用服务 ───────────────────────────────────────────────────────────────
+  server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: baiyang/server:latest
+    container_name: baiyang-server
+    restart: unless-stopped
+    environment:
+      BAIYANG_DB_URL: postgresql+asyncpg://baiyang:${POSTGRES_PASSWORD}@postgres:5432/baiyang
+      BAIYANG_HERMES_MOCK: "false"
+      BAIYANG_TENANTS_PATH: /app/config/tenants.yaml
+      BAIYANG_ADMIN_TOKEN: ${BAIYANG_ADMIN_TOKEN}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    volumes:
+      - ../config:/app/config:ro
+      - ../data:/app/data
+      - ../logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - baiyang-net
+    expose:
+      - "8327"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8327/v1/health',timeout=3).status==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ─── PostgreSQL 16 ─────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16
+    container_name: baiyang-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: baiyang
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: baiyang
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - baiyang-net
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U baiyang"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Redis 7 ───────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: baiyang-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    networks:
+      - baiyang-net
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ─── Nginx HTTPS + WSS ─────────────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: baiyang-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot-conf:/etc/letsencrypt:ro
+      - certbot-www:/var/www/certbot:ro
+    depends_on:
+      - server
+    networks:
+      - baiyang-net
+
+  # ─── Certbot (one-shot · 证书续期) ─────────────────────────────────────────
+  certbot:
+    image: certbot/certbot:latest
+    container_name: baiyang-certbot
+    volumes:
+      - certbot-conf:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"
+    networks:
+      - baiyang-net

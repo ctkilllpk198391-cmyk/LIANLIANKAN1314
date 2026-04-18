@@ -1,0 +1,39 @@
+"""常量 · 端口、路径、超时、限制。"""
+
+from __future__ import annotations
+
+VERSION = "0.1.0"
+
+DEFAULT_PORT = 8327
+DEFAULT_HOST = "0.0.0.0"
+DEFAULT_TENANT_ID = "tenant_0001"
+
+HERMES_DEFAULT_BASE_URL = "http://127.0.0.1:8317"
+HERMES_DEFAULT_TIMEOUT_SEC = 30
+HERMES_RETRY_COUNT = 3
+
+MAX_REPLY_LENGTH = 300
+MAX_PROMPT_LENGTH = 8000
+
+DEDUP_WINDOW_DAYS = 7
+DEDUP_THRESHOLD = 0.6
+
+DAILY_QUOTA_NEW = 30
+DAILY_QUOTA_SEASONED = 100
+DAILY_QUOTA_MAX = 150
+
+WORKHOUR_DEFAULT_START = "09:00"
+WORKHOUR_DEFAULT_END = "21:00"
+
+AUDIT_RETENTION_DAYS = 365
+
+FORBIDDEN_WORDS = (
+    "保证",
+    "一定",
+    "终身",
+    "稳赚",
+    "无风险",
+    "100%",
+    "包赔",
+    "保收益",
+)

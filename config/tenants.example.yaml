@@ -1,0 +1,14 @@
+# 白羊 tenants 配置 · 0 号客户：连大哥
+# 复制为 tenants.yaml 后填实际客户
+
+tenants:
+  - tenant_id: tenant_0001
+    boss_name: 连大哥
+    plan: pro
+    daily_quota: 100
+    workhour_start: "09:00"
+    workhour_end: "22:00"
+    style_hints: |
+      直接、简洁、轻微幽默
+      避免：过度客套、emoji 滥用、绝对化承诺
+      数字保留：金额必须精确到元

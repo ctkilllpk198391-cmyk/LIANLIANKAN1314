@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Create venv + install
+        run: |
+          uv venv --python=${{ matrix.python-version }}
+          uv pip install -e ".[dev]"
+          uv pip install greenlet
+
+      - name: Lint with ruff
+        run: .venv/bin/ruff check . || true   # Phase 1 不阻塞 lint
+
+      - name: Run pytest
+        env:
+          BAIYANG_HERMES_MOCK: "true"
+        run: .venv/bin/python -m pytest tests/ -v --tb=short
+
+      - name: Smoke test imports
+        run: |
+          .venv/bin/python -c "
+          import importlib
+          for m in ['server.main','client.main','pipeline.extract_chat','pipeline.train_lora','pipeline.judge','evolution.industry_flywheel','support.ai_agent']:
+              importlib.import_module(m)
+              print(f'  ✅ {m}')
+          "
+
+  build-docker:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t baiyang/server:${{ github.sha }} .

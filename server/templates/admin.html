@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>白羊管理后台</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <style>
+    body { background: #f8f9fa; }
+    .navbar-brand { font-weight: 700; letter-spacing: .05em; }
+    .stat-card { border: none; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .badge-plan-trial    { background: #6c757d; }
+    .badge-plan-pro      { background: #0d6efd; }
+    .badge-plan-flagship { background: #198754; }
+    .health-badge { font-size: .75rem; padding: .3em .6em; border-radius: 20px; }
+    .health-green  { background: #d1e7dd; color: #0a3622; }
+    .health-yellow { background: #fff3cd; color: #664d03; }
+    .health-red    { background: #f8d7da; color: #58151c; }
+    #issueModal .modal-header { background: #0d6efd; color: #fff; }
+  </style>
+</head>
+<body>
+
+<!-- 导航栏 -->
+<nav class="navbar navbar-dark bg-dark mb-4">
+  <div class="container-fluid">
+    <span class="navbar-brand">🐑 白羊管理后台</span>
+    <span class="navbar-text text-light" id="serverTime"></span>
+  </div>
+</nav>
+
+<div class="container-xl">
+
+  <!-- 概览卡片 -->
+  <div class="row g-3 mb-4" id="overviewRow">
+    <div class="col-md-3">
+      <div class="card stat-card p-3">
+        <div class="text-muted small">总租户</div>
+        <div class="fs-2 fw-bold" id="statTenants">-</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card stat-card p-3">
+        <div class="text-muted small">在线设备</div>
+        <div class="fs-2 fw-bold text-success" id="statOnline">-</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card stat-card p-3">
+        <div class="text-muted small">激活码发出</div>
+        <div class="fs-2 fw-bold text-primary" id="statCodes">-</div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card stat-card p-3">
+        <div class="text-muted small">已激活</div>
+        <div class="fs-2 fw-bold text-info" id="statActivated">-</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 操作栏 -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0">客户列表</h5>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#issueModal">
+      + 发激活码
+    </button>
+  </div>
+
+  <!-- 新码提示 -->
+  <div id="newCodeAlert" class="alert alert-success d-none" role="alert"></div>
+
+  <!-- 客户表格 -->
+  <div class="card border-0 shadow-sm">
+    <div class="card-body p-0">
+      <table class="table table-hover align-middle mb-0" id="customerTable">
+        <thead class="table-light">
+          <tr>
+            <th>Tenant ID</th>
+            <th>老板名</th>
+            <th>套餐</th>
+            <th>健康分</th>
+            <th>设备数</th>
+            <th>上次活跃</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="customerTbody">
+          <tr><td colspan="7" class="text-center text-muted py-4">加载中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<!-- 发激活码弹窗 -->
+<div class="modal fade" id="issueModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">发激活码</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">套餐</label>
+          <select class="form-select" id="issuePlan">
+            <option value="trial">trial（试用 30 天）</option>
+            <option value="pro" selected>pro（专业版 365 天）</option>
+            <option value="flagship">flagship（旗舰版 365 天）</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">有效天数</label>
+          <input type="number" class="form-control" id="issueValidDays" value="365" min="1" max="3650">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" id="issueBtn">生成</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  // 从 URL 参数或 sessionStorage 读取 admin token
+  const params = new URLSearchParams(location.search);
+  const TOKEN = params.get('token') || sessionStorage.getItem('adminToken') || '';
+  if (TOKEN) sessionStorage.setItem('adminToken', TOKEN);
+
+  const headers = { 'X-Admin-Token': TOKEN, 'Content-Type': 'application/json' };
+
+  function fmtTime(ts) {
+    if (!ts) return '-';
+    return new Date(ts * 1000).toLocaleString('zh-CN');
+  }
+
+  function healthBadge(score) {
+    const cls = score >= 80 ? 'health-green' : score >= 50 ? 'health-yellow' : 'health-red';
+    return `<span class="health-badge ${cls}">${score.toFixed(0)}</span>`;
+  }
+
+  function planBadge(plan) {
+    const cls = `badge-plan-${plan}`;
+    return `<span class="badge ${cls}">${plan}</span>`;
+  }
+
+  // 加载概览
+  async function loadOverview() {
+    try {
+      const r = await fetch('/admin/health/overview', { headers });
+      if (!r.ok) return;
+      const d = await r.json();
+      document.getElementById('statTenants').textContent   = d.total_tenants;
+      document.getElementById('statOnline').textContent    = d.online_devices;
+      document.getElementById('statCodes').textContent     = d.total_activation_codes;
+      document.getElementById('statActivated').textContent = d.activated_codes;
+    } catch(e) { console.error(e); }
+  }
+
+  // 加载客户列表
+  async function loadCustomers() {
+    try {
+      const r = await fetch('/admin/customers', { headers });
+      if (!r.ok) {
+        document.getElementById('customerTbody').innerHTML =
+          `<tr><td colspan="7" class="text-danger text-center py-4">认证失败（检查 token）</td></tr>`;
+        return;
+      }
+      const list = await r.json();
+      const tbody = document.getElementById('customerTbody');
+      if (!list.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">暂无客户</td></tr>';
+        return;
+      }
+      tbody.innerHTML = list.map(c => `
+        <tr>
+          <td><code>${c.tenant_id}</code></td>
+          <td>${c.boss_name}</td>
+          <td>${planBadge(c.plan)}</td>
+          <td>${healthBadge(c.health_score)}</td>
+          <td>${c.device_count}</td>
+          <td>${fmtTime(c.last_active_at)}</td>
+          <td>
+            <a href="/admin/customers/${c.tenant_id}?token=${TOKEN}" class="btn btn-outline-secondary btn-sm">详情</a>
+          </td>
+        </tr>
+      `).join('');
+    } catch(e) { console.error(e); }
+  }
+
+  // 发激活码
+  document.getElementById('issueBtn').addEventListener('click', async () => {
+    const plan = document.getElementById('issuePlan').value;
+    const valid_days = parseInt(document.getElementById('issueValidDays').value, 10);
+    try {
+      const r = await fetch('/admin/issue_code', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ plan, valid_days }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        const alert = document.getElementById('newCodeAlert');
+        alert.textContent = `激活码：${d.code}（${d.plan} · ${d.valid_days} 天）`;
+        alert.classList.remove('d-none');
+        bootstrap.Modal.getInstance(document.getElementById('issueModal')).hide();
+        setTimeout(() => alert.classList.add('d-none'), 15000);
+      }
+    } catch(e) { console.error(e); }
+  });
+
+  // 时间显示
+  function tick() {
+    document.getElementById('serverTime').textContent = new Date().toLocaleString('zh-CN');
+  }
+
+  tick();
+  setInterval(tick, 1000);
+  loadOverview();
+  loadCustomers();
+  setInterval(loadOverview, 30000);
+</script>
+</body>
+</html>

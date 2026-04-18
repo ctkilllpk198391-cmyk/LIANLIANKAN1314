@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>白羊看板 v3 · {{ tenant_id }}</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #f5f5f7;
+      color: #1d1d1f;
+      padding: 24px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    h1 { font-size: 28px; margin-bottom: 4px; }
+    .subtitle { color: #888; font-size: 14px; margin-bottom: 24px; }
+    .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+    .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 24px; }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    .metric { font-size: 36px; font-weight: 600; line-height: 1; margin-bottom: 8px; }
+    .metric.green  { color: #34c759; }
+    .metric.orange { color: #ff9500; }
+    .metric.red    { color: #ff3b30; }
+    .label { color: #888; font-size: 13px; }
+    .section {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .section h2 { font-size: 18px; margin-bottom: 16px; }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .row:last-child { border-bottom: 0; }
+    .row .k { color: #888; }
+    .row .v { font-weight: 500; }
+
+    /* 同行对标进度条 */
+    .bench-wrap { margin: 12px 0; }
+    .bench-label { font-size: 13px; color: #555; margin-bottom: 4px; }
+    .bench-bar-bg {
+      background: #e5e5ea;
+      border-radius: 6px;
+      height: 14px;
+      position: relative;
+      overflow: hidden;
+    }
+    .bench-bar-fill {
+      height: 100%;
+      border-radius: 6px;
+      transition: width 0.6s ease;
+    }
+    .bench-bar-fill.yours  { background: #007aff; }
+    .bench-bar-fill.p50    { background: #ff9500; }
+    .bench-bar-fill.p90    { background: #34c759; }
+
+    /* 沉睡客户列表 */
+    .stale-list { list-style: none; }
+    .stale-list li {
+      padding: 8px 12px;
+      border-bottom: 1px solid #eee;
+      font-size: 14px;
+      color: #c00;
+    }
+    .stale-list li:last-child { border-bottom: 0; }
+
+    /* 漏斗条 */
+    .funnel-stage {
+      display: flex;
+      align-items: center;
+      margin-bottom: 12px;
+      gap: 12px;
+    }
+    .funnel-stage-label { width: 60px; font-size: 13px; color: #555; }
+    .funnel-bar-bg { flex: 1; background: #e5e5ea; border-radius: 6px; height: 24px; overflow: hidden; }
+    .funnel-bar-fill { height: 100%; background: #007aff; border-radius: 6px; }
+    .funnel-count { width: 48px; text-align: right; font-weight: 600; font-size: 14px; }
+    .funnel-rate  { width: 52px; font-size: 12px; color: #888; }
+
+    /* v3 账号卡片 */
+    .account-cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+    .account-card {
+      background: #f5f5f7;
+      border-radius: 10px;
+      padding: 12px 16px;
+      min-width: 160px;
+      flex: 1;
+    }
+    .account-card.active { border: 2px solid #007aff; background: #e8f0ff; }
+    .account-card .acc-id { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+    .account-card .acc-meta { font-size: 12px; color: #888; }
+    .health-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      margin-right: 4px;
+    }
+    .health-dot.green  { background: #34c759; }
+    .health-dot.yellow { background: #ff9500; }
+    .health-dot.red    { background: #ff3b30; }
+
+    /* v3 待成交列表 */
+    .pipeline-list { list-style: none; }
+    .pipeline-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid #eee;
+      font-size: 14px;
+    }
+    .pipeline-item:last-child { border-bottom: 0; }
+    .pipeline-urgency { color: #ff9500; letter-spacing: -2px; min-width: 36px; }
+    .pipeline-name { flex: 1; font-weight: 500; }
+    .pipeline-meta { color: #888; font-size: 12px; min-width: 80px; text-align: right; }
+    .pipeline-actions { display: flex; gap: 6px; }
+    .btn-sm {
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid #ddd;
+      background: white;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .btn-sm.primary { background: #007aff; color: white; border-color: #007aff; }
+    .btn-sm.skip { color: #999; }
+
+    /* v3 今日 AI 摘要 */
+    .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 4px; }
+    .summary-item { text-align: center; }
+    .summary-num { font-size: 28px; font-weight: 700; color: #007aff; }
+    .summary-lbl { font-size: 12px; color: #888; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <h1>白羊看板 v3 · {{ tenant_id }}</h1>
+  <div class="subtitle">最后更新：{{ as_of }}</div>
+
+  <!-- ── v3 我的微信账号卡片 ────────────────────────────────────────── -->
+  <div class="section" id="accounts-section">
+    <h2>我的微信账号</h2>
+    <div class="account-cards" id="account-cards"><div style="color:#888;font-size:13px">加载中…</div></div>
+  </div>
+
+  <!-- 今日数字 -->
+  <div class="grid3">
+    <div class="card">
+      <div class="metric green" id="today-rate">—</div>
+      <div class="label">今日采纳率</div>
+    </div>
+    <div class="card">
+      <div class="metric" id="today-acc">—</div>
+      <div class="label">采纳 / 生成</div>
+    </div>
+    <div class="card">
+      <div class="metric orange" id="today-sent">—</div>
+      <div class="label">今日已发</div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <!-- 7 天趋势 -->
+    <div class="section">
+      <h2>7 天采纳率趋势</h2>
+      <canvas id="trendChart" height="180"></canvas>
+    </div>
+
+    <!-- 客户分级饼图 -->
+    <div class="section">
+      <h2>客户分级（A / B / C）</h2>
+      <canvas id="tierChart" height="180"></canvas>
+      <div id="tier-counts" style="margin-top:12px;font-size:13px;color:#555;"></div>
+    </div>
+  </div>
+
+  <!-- 成交漏斗 -->
+  <div class="section">
+    <h2>成交漏斗</h2>
+    <div id="funnel-stages"></div>
+  </div>
+
+  <!-- 同行对标 -->
+  <div class="section">
+    <h2>同行对标（行业：<span id="bench-industry">—</span>）</h2>
+    <div class="bench-wrap">
+      <div class="bench-label">你的采纳率 <span id="bench-your">—</span></div>
+      <div class="bench-bar-bg"><div class="bench-bar-fill yours" id="bench-bar-your" style="width:0%"></div></div>
+    </div>
+    <div class="bench-wrap">
+      <div class="bench-label">行业均值 P50 <span id="bench-p50">—</span></div>
+      <div class="bench-bar-bg"><div class="bench-bar-fill p50" id="bench-bar-p50" style="width:0%"></div></div>
+    </div>
+    <div class="bench-wrap">
+      <div class="bench-label">行业优秀 P90 <span id="bench-p90">—</span></div>
+      <div class="bench-bar-bg"><div class="bench-bar-fill p90" id="bench-bar-p90" style="width:0%"></div></div>
+    </div>
+    <p style="margin-top:12px;font-size:13px;color:#555;">
+      超过行业均值：<strong id="bench-delta">—</strong>
+    </p>
+  </div>
+
+  <!-- 沉睡客户 top 10 -->
+  <div class="section">
+    <h2>沉睡客户（30 天未联系 · Top 10）</h2>
+    <ul class="stale-list" id="stale-list"><li>加载中…</li></ul>
+  </div>
+
+  <!-- ── v3 今日待成交列表 ───────────────────────────────────────────── -->
+  <div class="section">
+    <h2>今日待成交（Top 10 · 紧迫度排序）</h2>
+    <ul class="pipeline-list" id="pipeline-list"><li style="color:#888;padding:8px 0">加载中…</li></ul>
+  </div>
+
+  <!-- ── v3 今日 AI 已自动处理摘要 ──────────────────────────────────── -->
+  <div class="section">
+    <h2>今日 AI 已自动处理摘要</h2>
+    <div class="summary-grid">
+      <div class="summary-item">
+        <div class="summary-num" id="sum-inbound">—</div>
+        <div class="summary-lbl">客户来消息</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-num" id="sum-autosend">—</div>
+        <div class="summary-lbl">AI 自动回复</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-num" id="sum-handoff">—</div>
+        <div class="summary-lbl">转人工</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-num" id="sum-orders">—</div>
+        <div class="summary-lbl">成交</div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const TENANT = "{{ tenant_id }}";
+
+async function fetchJSON(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error("fetch " + path + " => " + r.status);
+  return r.json();
+}
+
+function pct(v) { return (v * 100).toFixed(1) + "%"; }
+
+let trendChart = null;
+let tierChart  = null;
+
+function urgencyFlash(n) {
+  return n > 0 ? "⚡".repeat(n) : "—";
+}
+
+async function loadV3Extras(v3) {
+  // ── 多账号卡片 ──
+  const accounts = v3.multi_account || [];
+  const acCards = document.getElementById("account-cards");
+  if (accounts.length === 0) {
+    acCards.innerHTML = '<div style="color:#888;font-size:13px">暂无账号数据</div>';
+  } else {
+    acCards.innerHTML = accounts.map(acc => {
+      const levelClass = acc.health_level || "green";
+      const activeClass = acc.is_active ? " active" : "";
+      return `<div class="account-card${activeClass}">
+        <div class="acc-id">${acc.account_id}${acc.is_active ? " ✓" : ""}</div>
+        <div class="acc-meta">
+          <span class="health-dot ${levelClass}"></span>${Math.round(acc.health_score || 100)}分
+          &nbsp;|&nbsp;${acc.role}
+        </div>
+        <div class="acc-meta">客户 ${acc.customer_count} &nbsp;成交 ${acc.today_orders}</div>
+      </div>`;
+    }).join("");
+  }
+
+  // ── 今日待成交 ──
+  const pipeline = v3.pipeline || [];
+  const pList = document.getElementById("pipeline-list");
+  if (pipeline.length === 0) {
+    pList.innerHTML = '<li style="color:#888;padding:8px 0">暂无待成交客户</li>';
+  } else {
+    pList.innerHTML = pipeline.map((c, idx) => `
+      <li class="pipeline-item">
+        <div class="pipeline-urgency">${urgencyFlash(c.urgency)}</div>
+        <div class="pipeline-name">
+          ${c.nickname || c.chat_id}
+          <span style="font-size:11px;color:#888;margin-left:6px">${c.vip_tier}-${c.stage}</span>
+        </div>
+        <div class="pipeline-meta">${c.days_since_last}天前 · ¥${c.pending_value_estimate}</div>
+        <div class="pipeline-actions">
+          <button class="btn-sm primary" onclick="handleAdopt('${c.chat_id}', ${idx})">采纳</button>
+          <button class="btn-sm" onclick="handleEdit('${c.chat_id}', ${idx})">编辑</button>
+          <button class="btn-sm skip" onclick="handleSkip('${c.chat_id}', ${idx})">跳过</button>
+        </div>
+      </li>
+    `).join("");
+  }
+
+  // ── 今日摘要 ──
+  const s = v3.today_summary || {};
+  document.getElementById("sum-inbound").textContent = s.inbound ?? "—";
+  document.getElementById("sum-autosend").textContent = s.auto_send ?? "—";
+  document.getElementById("sum-handoff").textContent = s.handoff ?? "—";
+  document.getElementById("sum-orders").textContent = s.orders ?? "—";
+}
+
+// 按钮占位处理
+function handleAdopt(chatId, idx) { alert("采纳：" + chatId + "（待接入行动引擎）"); }
+function handleEdit(chatId, idx) { alert("编辑：" + chatId + "（待接入行动引擎）"); }
+function handleSkip(chatId, idx) {
+  const items = document.querySelectorAll(".pipeline-item");
+  if (items[idx]) items[idx].style.opacity = "0.35";
+}
+
+async function loadAll() {
+  try {
+    const [v3, trend] = await Promise.all([
+      fetchJSON(`/v1/dashboard/${TENANT}/v3`),
+      fetchJSON(`/v1/dashboard/${TENANT}/trend?days=7`),
+    ]);
+    const v2 = v3; // v3 包含 v2 所有字段
+
+    // 今日数字
+    const t = v2.today;
+    document.getElementById("today-rate").textContent = pct(t.acceptance_rate);
+    document.getElementById("today-acc").textContent  = `${t.accepted} / ${t.total_generated}`;
+    document.getElementById("today-sent").textContent = t.sent;
+
+    // ── 趋势图 ──
+    const tCtx = document.getElementById("trendChart").getContext("2d");
+    if (trendChart) trendChart.destroy();
+    trendChart = new Chart(tCtx, {
+      type: "line",
+      data: {
+        labels: trend.dates,
+        datasets: [
+          {
+            label: "采纳率",
+            data: trend.acceptance_rate.map(v => (v * 100).toFixed(1)),
+            borderColor: "#007aff",
+            backgroundColor: "rgba(0,122,255,0.08)",
+            fill: true,
+            tension: 0.3,
+            pointRadius: 4,
+          },
+        ],
+      },
+      options: {
+        scales: {
+          y: { min: 0, max: 100, ticks: { callback: v => v + "%" } },
+        },
+        plugins: { legend: { display: false } },
+      },
+    });
+
+    // ── 客户分级饼图 ──
+    const c = v2.customers;
+    const pCtx = document.getElementById("tierChart").getContext("2d");
+    if (tierChart) tierChart.destroy();
+    tierChart = new Chart(pCtx, {
+      type: "doughnut",
+      data: {
+        labels: ["A · VIP", "B · 活跃", "C · 沉睡"],
+        datasets: [{
+          data: [c.tier_a, c.tier_b, c.tier_c],
+          backgroundColor: ["#34c759", "#ff9500", "#ff3b30"],
+        }],
+      },
+      options: {
+        plugins: { legend: { position: "bottom" } },
+        cutout: "60%",
+      },
+    });
+    document.getElementById("tier-counts").innerHTML =
+      `共 ${c.total} 人 &nbsp;|&nbsp; A: ${c.tier_a} &nbsp;B: ${c.tier_b} &nbsp;C: ${c.tier_c}`;
+
+    // ── 成交漏斗 ──
+    const f = v2.funnel;
+    const maxVal = Math.max(f.inquiry, 1);
+    const stages = [
+      { label: "询价", count: f.inquiry,     rate: "" },
+      { label: "砍价", count: f.negotiation, rate: pct(f.rates.inq_to_neg) },
+      { label: "下单", count: f.order,       rate: pct(f.rates.neg_to_order) },
+      { label: "复购", count: f.repurchase,  rate: pct(f.rates.order_to_rep) },
+    ];
+    const fEl = document.getElementById("funnel-stages");
+    fEl.innerHTML = stages.map(s => `
+      <div class="funnel-stage">
+        <div class="funnel-stage-label">${s.label}</div>
+        <div class="funnel-bar-bg">
+          <div class="funnel-bar-fill" style="width:${(s.count / maxVal * 100).toFixed(1)}%"></div>
+        </div>
+        <div class="funnel-count">${s.count}</div>
+        <div class="funnel-rate">${s.rate || "—"}</div>
+      </div>
+    `).join("");
+
+    // ── 同行对标 ──
+    const b = v2.benchmark;
+    document.getElementById("bench-industry").textContent = b.industry;
+    document.getElementById("bench-your").textContent = pct(b.your_acceptance_rate);
+    document.getElementById("bench-p50").textContent  = pct(b.industry_p50);
+    document.getElementById("bench-p90").textContent  = pct(b.industry_p90);
+    document.getElementById("bench-delta").textContent = (b.delta_pct >= 0 ? "+" : "") + b.delta_pct + "%";
+    document.getElementById("bench-bar-your").style.width = (b.your_acceptance_rate * 100).toFixed(1) + "%";
+    document.getElementById("bench-bar-p50").style.width  = (b.industry_p50 * 100).toFixed(1) + "%";
+    document.getElementById("bench-bar-p90").style.width  = (b.industry_p90 * 100).toFixed(1) + "%";
+
+    // ── 沉睡客户 ──
+    const stale = v2.customers.stale_30d_alert || [];
+    const ul = document.getElementById("stale-list");
+    if (stale.length === 0) {
+      ul.innerHTML = "<li style='color:#888'>暂无沉睡客户</li>";
+    } else {
+      ul.innerHTML = stale.map(cid => `<li>⚠ ${cid}</li>`).join("");
+    }
+
+    // ── v3 extras ──
+    await loadV3Extras(v3);
+
+  } catch (err) {
+    console.error("dashboard load error:", err);
+  }
+}
+
+loadAll();
+setInterval(loadAll, 60_000); // 每分钟刷新
+</script>
+</body>
+</html>
