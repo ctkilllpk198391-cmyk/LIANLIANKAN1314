@@ -55,6 +55,15 @@ jobs:
         run: |
           choco install innosetup --no-progress -y
 
+      - name: Install Chinese Simplified language pack
+        shell: pwsh
+        run: |
+          $url = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseSimplified.isl"
+          $dest = "C:\Program Files (x86)\Inno Setup 6\Languages\ChineseSimplified.isl"
+          Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+          if (-not (Test-Path $dest)) { throw "Failed to download ChineseSimplified.isl" }
+          Write-Host "Language pack installed: $dest"
+
       - name: Build Setup.exe with Inno Setup
         shell: pwsh
         run: |
