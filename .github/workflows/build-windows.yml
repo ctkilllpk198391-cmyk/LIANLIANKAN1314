@@ -75,14 +75,25 @@ jobs:
           Write-Host "Setup size:"
           (Get-Item "dist/WechatAgent-Setup.exe").Length / 1MB
 
+      - name: Disable Defender realtime scan + add exclusions (CI speed)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionPath "$env:LocalAppData\WechatAgent" -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionPath "$env:TEMP" -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionPath "D:\a\LIANLIANKAN1314" -ErrorAction SilentlyContinue
+          Write-Host "Defender realtime: $((Get-MpPreference).DisableRealtimeMonitoring)"
+
       - name: Verify setup.exe install behavior (no run, avoid --onefile slow start)
         shell: pwsh
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: |
           Write-Host "=== [1/4] SILENT install ===" -ForegroundColor Cyan
           $logPath = "$env:TEMP\setup_install.log"
+          # Removed /CURRENTUSER — was triggering hidden privilege dialog deadlock
           $proc = Start-Process -Wait -PassThru -FilePath "dist\WechatAgent-Setup.exe" `
-            -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/CURRENTUSER","/LOG=$logPath"
+            -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/LOG=$logPath"
           Write-Host "Install exit code: $($proc.ExitCode)"
           if ($proc.ExitCode -ne 0) {
             Get-Content $logPath -Tail 40 -ErrorAction SilentlyContinue

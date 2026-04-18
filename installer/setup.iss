@@ -13,7 +13,6 @@ LicenseFile=..\legal\user_agreement_v3.md
 OutputDir=..\dist
 OutputBaseFilename=WechatAgent-Setup
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
 WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes
