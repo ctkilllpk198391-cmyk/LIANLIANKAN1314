@@ -116,6 +116,30 @@ jobs:
           Write-Host ""
           Write-Host "=== Install verification PASSED ===" -ForegroundColor Green
 
+      - name: End-to-end · run wechat_agent.exe --check-only (server reachability)
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          Write-Host "=== run installed wechat_agent.exe --check-only ===" -ForegroundColor Cyan
+          $exe = "$env:LocalAppData\WechatAgent\wechat_agent.exe"
+          $env:PYTHONIOENCODING = "utf-8"
+          $env:PYTHONUNBUFFERED = "1"
+          # --onefile bootstrap might take 30-60s on Defender-scanned runner
+          $proc = Start-Process -Wait -PassThru -FilePath $exe `
+            -ArgumentList "--tenant","tenant_0001","--server","http://120.26.208.212","--check-only" `
+            -RedirectStandardOutput "$env:TEMP\client_out.log" `
+            -RedirectStandardError "$env:TEMP\client_err.log"
+          Write-Host "Exit code: $($proc.ExitCode)"
+          Write-Host ""
+          Write-Host "--- stdout ---"
+          Get-Content "$env:TEMP\client_out.log" -ErrorAction SilentlyContinue
+          Write-Host ""
+          Write-Host "--- stderr ---"
+          Get-Content "$env:TEMP\client_err.log" -ErrorAction SilentlyContinue
+          if ($proc.ExitCode -ne 0) { throw "wechat_agent.exe --check-only failed (exit $($proc.ExitCode))" }
+          Write-Host ""
+          Write-Host "=== End-to-end PASSED · client connects to server ===" -ForegroundColor Green
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

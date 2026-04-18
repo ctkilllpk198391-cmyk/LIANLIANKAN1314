@@ -128,6 +128,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--server", default="http://127.0.0.1:8327", help="server URL")
     p.add_argument("--mock", action="store_true", help="mock 模式 · macOS 调试")
     p.add_argument("--auto-accept", action="store_true", help="无人值守自动 accept (仅测试)")
+    p.add_argument("--check-only", action="store_true",
+                   help="只跑 server health + 微信版本探测,验证后退出(CI smoke test 用)")
     return p.parse_args()
 
 
@@ -143,6 +145,23 @@ def main() -> None:
         mock=args.mock,
         auto_accept=args.auto_accept,
     )
+
+    if args.check_only:
+        # CI smoke test: 仅验证 server 可达 + 微信版本探测,不启动 watcher
+        async def _check():
+            health = await app.api.health()
+            if not health:
+                logger.error("FAIL: server unreachable: %s", args.server)
+                sys.exit(1)
+            logger.info("OK: server health = %s", health)
+            if not app.mock:
+                v = detect_wechat_version()
+                logger.info("WeChat PC version: %s (None = not installed, OK for CI)",
+                            v or "None")
+            logger.info("CHECK-ONLY PASSED")
+        asyncio.run(_check())
+        return
+
     try:
         asyncio.run(app.run())
     except KeyboardInterrupt:
