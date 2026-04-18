@@ -9,8 +9,8 @@ AppPublisher=wechat_agent
 AppPublisherURL=https://wechat-agent.example
 DefaultDirName={localappdata}\WechatAgent
 DefaultGroupName=WechatAgent
-LicenseFile=legal\user_agreement_v3.md
-OutputDir=dist
+LicenseFile=..\legal\user_agreement_v3.md
+OutputDir=..\dist
 OutputBaseFilename=WechatAgent-Setup
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
@@ -27,8 +27,8 @@ UninstallDisplayIcon={app}\wechat_agent.exe
 Name: "schinese"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Files]
-Source: "dist\wechat_agent.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "legal\*.md"; DestDir: "{app}\legal"; Flags: ignoreversion recursesubdirs
+Source: "..\dist\wechat_agent.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\legal\*.md"; DestDir: "{app}\legal"; Flags: ignoreversion recursesubdirs
 
 [Icons]
 Name: "{userdesktop}\WechatAgent"; Filename: "{app}\wechat_agent.exe"; \

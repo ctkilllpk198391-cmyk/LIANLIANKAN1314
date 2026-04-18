@@ -1231,3 +1231,61 @@ Launching client in a new window...
 - 第一个真实客户装机 = 端到端关键验证
 - 三个 PS 5.1 坑都踩过且修过 → 第二个客户装机零阻力
 - install.bat 模板可复用 → 后续每个客户 5-8 分钟装好,无需粘命令
+
+---
+
+## Session 9 · 2026-04-18 · 路线切换:PowerShell ad-hoc → setup.exe 产品化 🎯
+
+### 触发原因
+- Session 8 装机 ✅ 但客户端**仍黑屏**(stdout 编码 + 缓冲又一个新坑)
+- 连大哥失去信任:"你说最后一步已经很多次了,每次都没有解决问题"
+- 需求重新对齐:**万能安装包**,客户每台电脑都能装,不再补丁
+
+### 调研(super-search)
+- 行业金标准 = `PyInstaller (单 exe 含 Python runtime) + Inno Setup (安装向导)`
+- 客户机器**完全不需要**装 Python / pip 包 / PowerShell 配置
+- 项目里 `installer/setup.iss` + `installer/nuitka_build.py` 早就半成品,但 macOS 不能编译 Windows exe
+
+### 路线决策:GitHub Actions windows-latest 自动编译
+- 免费 + 一劳永逸 + 改代码自动出新版本
+- 客户操作 = 下载 setup.exe → 双击 → 输入激活码 → 完
+
+### 错误清单入库(以后不犯)
+1. **跳过项目已有 installer/** 走 ad-hoc PowerShell → 一晚踩 6+ 坑
+2. **没 Windows 环境就发布给真实客户** → 客户当小白鼠
+3. **反复说"最后一步"** → 透支信任
+4. **路线错继续打补丁** → 同类问题修 2-3 次仍出新坑应立即换路
+5. **macOS zip 默认带 .__** → 必须 `COPYFILE_DISABLE=1` + `-x "**/._*"`
+6. **Windows cmd 跑 Python 必三件套**:`chcp 65001` + `PYTHONIOENCODING=utf-8` + `python -u`
+7. **wxauto vs wxautox 包名不一致** → 代码 `try wxautox else wxauto`
+
+入库 aivectormemory id `77e17a7c8e1c`(踩坑+复盘+教训 tag)
+
+### 本 session 产出(都验证过)
+- ✅ `installer/wechat_agent.spec` PyInstaller 配置(`collect_all` 收集 fastapi/pydantic/aiohttp/sqlalchemy/wxautox/humancursor 全部依赖)
+- ✅ `installer/setup.iss` 重写(用户级 lowest 不需 admin · 激活码 wizard · 服务器 URL/Tenant 默认填好 · `[Code]` 段写 .env · 桌面快捷方式 + HKCU 开机自启)
+- ✅ `.github/workflows/build-windows.yml` GitHub Actions(windows-latest · pip install + pyinstaller + choco install innosetup + iscc · upload artifact + 打 tag 自动 release)
+- ✅ `installer/BUILD_GUIDE.md` 连大哥的 GitHub 操作指南
+
+### 验证(macOS 端先跑通确认 spec 正确)
+```bash
+$ python3 -m PyInstaller installer/wechat_agent.spec --clean --noconfirm
+# → dist/wechat_agent (98MB macOS arm64 bin)
+$ ./dist/wechat_agent --help
+usage: baiyang-client [-h] --tenant TENANT [--server SERVER] [--mock] [--auto-accept]
+# → 入口正确 · argparse 正常 · 全部 import 成功
+```
+
+修了 1 个 spec 路径 bug + 1 个 appdirs 缺失依赖 · 第 3 次编译通过。
+
+### 客户最终操作(代替之前所有 install.bat / launcher.bat / diagnose.bat)
+1. 浏览器:`http://120.26.208.212/download/WechatAgent-Setup.exe` → 下载
+2. 双击 setup.exe → 同意协议 → 输入激活码 → 完成
+3. 自动桌面快捷方式 + 开机自启
+4. 客户登录微信 PC 即可
+
+### 下一步(等连大哥)
+- 创建 GitHub repo + push(我帮做大部分,user 给 token 就行)
+- 触发 workflow → 15 分钟出 Windows setup.exe
+- 我下载 artifact → 上传到 `http://120.26.208.212/download/WechatAgent-Setup.exe`
+- 客户重新走流程
