@@ -1289,3 +1289,66 @@ usage: baiyang-client [-h] --tenant TENANT [--server SERVER] [--mock] [--auto-ac
 - 触发 workflow → 15 分钟出 Windows setup.exe
 - 我下载 artifact → 上传到 `http://120.26.208.212/download/WechatAgent-Setup.exe`
 - 客户重新走流程
+
+---
+
+## Session 10 · 2026-04-18 · GitHub Actions 真编出 setup.exe 实战 ✅
+
+### 连大哥配合(5 分钟)
+- 创建 GitHub repo `ctkilllpk198391-cmyk/LIANLIANKAN1314`
+- 给 PAT token (我帮 push + 触发 + 监控,token 用完未 commit 进代码)
+
+### Build 迭代实录(4 次,每次都是 macOS 没法预见的 Windows 真环境特异性)
+
+| # | run id | 失败 step | 根因 | 修复 |
+|---|---|---|---|---|
+| 1 | 24596393429 | Build Setup.exe (Inno Setup) | `LicenseFile=legal\user_agreement_v3.md` 解析为 `installer/legal/...` 找不到 | setup.iss 路径改 `..\legal\...`(iscc 相对 .iss 文件目录) |
+| 2 | 24596484970 | Build Setup.exe (Inno Setup) | 找不到 `compiler:Languages\ChineseSimplified.isl`(chocolatey 装的最小 Inno Setup 不带 unofficial 中文包) | yaml 加 step `Invoke-WebRequest` 从 `raw.githubusercontent.com/jrsoftware/issrc/.../ChineseSimplified.isl` 下到 Inno Setup Languages 目录 |
+| 3 | 24596554204 | ✅ success | — | 出 `dist/WechatAgent-Setup.exe` 60MB |
+| 4 | 24596634851 | ⏱️ 验证中 | yaml 加 SILENT install + `wechat_agent.exe --help` smoke test (在 windows-latest runner 自验证) | — |
+
+### Build #3 产出确认(本地下载验证)
+```
+$ file /tmp/setup_pkg/WechatAgent-Setup.exe
+PE32 executable (GUI) Intel 80386, for MS Windows
+$ ls -lh /tmp/setup_pkg/
+60 MB
+$ md5  → b77be1c6f9924192bc7b98f956a0d707
+```
+
+### setup.iss 关键修改(2026-04-18 v2)
+- `PrivilegesRequired=lowest`(用户级 · 不需 admin)
+- `DefaultDirName={localappdata}\WechatAgent`(用户目录)
+- `LicenseFile=..\legal\user_agreement_v3.md`(相对 .iss 路径)
+- `OutputDir=..\dist`(出在项目根 dist/)
+- `Source: "..\dist\wechat_agent.exe"` + `"..\legal\*.md"`(相对路径)
+- `[Icons]` 用 `{userdesktop}` + `{userprograms}`(无需 admin)
+- `[Registry]` HKCU 写开机自启(无需 admin)
+- `[Code]` ActivationPage + ServerPage + CurStepChanged 写 `.env`
+- `[Run]` 启动 wechat_agent.exe 带 `--tenant {code:GetTenant} --server {code:GetServer} --auto-accept`
+
+### .github/workflows/build-windows.yml 关键步骤
+1. `actions/checkout@v4`
+2. `actions/setup-python@v5` Python 3.11
+3. pip install pyinstaller==6.11.1 + 全部依赖(含 wxautox + pywin32 + appdirs + setuptools)
+4. **Verify imports**(`import client.main; from wxautox import WeChat`)
+5. **Build EXE PyInstaller**(spec 用 `os.path.join(PROJECT_ROOT, 'client', 'main.py')`)
+6. `choco install innosetup` + 下载 ChineseSimplified.isl
+7. `iscc installer/setup.iss` 出 WechatAgent-Setup.exe
+8. **Smoke test**(SILENT install + `wechat_agent.exe --help` 验证)
+9. `actions/upload-artifact@v4`
+10. (tag push) `softprops/action-gh-release@v2`
+
+### CUSTOMER_SETUP_GUIDE.md(客户用)
+- 浏览器下 setup.exe → 双击 → 输激活码 → 完成 → 登微信 → 测试 AI 回复
+- 验证方式 / 常见问题 / 卸载
+
+### 待 build #4 通过后
+1. 重新下载 verified artifact
+2. `scp` 上传到 `120.26.208.212:/usr/share/nginx/html/download/WechatAgent-Setup.exe`
+3. 通知连大哥发链接给客户
+
+### 价值
+- **再也不需要 PowerShell/install.bat/launcher.bat/diagnose.bat 这套补丁**
+- 客户体验 = 下载 setup.exe + 双击 + 输激活码 = 完
+- 每次改代码: `git push` → 自动 GitHub Actions 编 → 出新 setup.exe
