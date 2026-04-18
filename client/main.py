@@ -13,6 +13,23 @@ import logging
 import platform
 import sys
 
+# Force unbuffered stdout/stderr (Windows cmd + PyInstaller --onefile)
+try:
+    sys.stdout.reconfigure(line_buffering=True, encoding='utf-8')  # type: ignore
+    sys.stderr.reconfigure(line_buffering=True, encoding='utf-8')  # type: ignore
+except Exception:
+    pass
+
+# Boot banner so user sees something immediately (before PyInstaller --onefile slow start finishes)
+print("=" * 60, flush=True)
+print("  wechat_agent client booting...", flush=True)
+print("  (first launch may take 1-3 min due to Windows Defender)", flush=True)
+print("  (subsequent launches are ~10x faster)", flush=True)
+print("=" * 60, flush=True)
+print(f"  Python: {sys.version.split()[0]}", flush=True)
+print(f"  Args: {' '.join(sys.argv[1:])}", flush=True)
+print("=" * 60, flush=True)
+
 from client.api_client import ServerAPIClient
 from client.review_popup import ConsoleReviewPopup, HeadlessAutoAccept
 from client.risk_control import RiskController, WorkSchedule
@@ -25,6 +42,8 @@ from shared.types import ReviewDecisionEnum
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    stream=sys.stdout,  # 默认 stderr,改 stdout 与 boot banner 同流向 + 易刷
+    force=True,
 )
 logger = logging.getLogger("baiyang.client")
 
