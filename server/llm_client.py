@@ -75,15 +75,21 @@ class LLMClient:
         )
 
         try:
-            return await client.chat(
+            text = await client.chat(
                 prompt=prompt,
                 max_tokens=max_tokens,
                 system=system or fallback_system,
             )
+            # real 模式(mock=False)下返 mock 字串 = key/env 丢失 · 拒发防止发垃圾给客户
+            if not self.mock and text and text.startswith("[mock·"):
+                logger.error("%s 返 mock 字串但 real 模式 · 判定 key/env 丢失 · 拒发", model_route)
+                raise HermesUnreachableError(f"{model_route} unconfigured (mock returned in real mode)")
+            return text
+        except HermesUnreachableError:
+            raise
         except Exception as e:
-            logger.warning("%s 失败 · fallback mock: %s", model_route, e)
-            from server.llm_clients import MiniMaxClient
-            return await MiniMaxClient(mock=True).chat(prompt, max_tokens, system=system)
+            logger.warning("%s 调失败 · raise 让上层跳过发送: %s", model_route, e)
+            raise HermesUnreachableError(f"{model_route} failed: {e}") from e
 
     async def health(self) -> bool:
         return len(self.registry.list_available()) > 0

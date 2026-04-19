@@ -269,7 +269,10 @@ class MiniMaxClient(BaseLLMClient):
         return await self._chat_openai(prompt, max_tokens, temperature, system)
 
     async def _chat_anthropic(self, prompt, max_tokens, temperature, system):
-        # MiniMax Anthropic 兼容 endpoint: /v1/messages（标准 Anthropic 路径）
+        # MiniMax Anthropic 兼容 endpoint: /v1/messages(标准 Anthropic 路径)
+        # M2.7-highspeed 强制输出 thinking 块 · thinking 吃 200-500 tokens · 若 max_tokens 不够
+        # 则 text 块被切光 · 返空字串 · 客户端以为"没回". 预留 1000 tokens 给 thinking.
+        effective_max = max(max_tokens + 1000, 1500)
         url = f"{self.base_url}/v1/messages"
         headers = {
             "x-api-key": self.api_key,
@@ -278,7 +281,7 @@ class MiniMaxClient(BaseLLMClient):
         }
         body: dict = {
             "model": self.model,
-            "max_tokens": max_tokens,
+            "max_tokens": effective_max,
             "temperature": temperature,
             "messages": [{"role": "user", "content": prompt}],
         }
@@ -292,10 +295,18 @@ class MiniMaxClient(BaseLLMClient):
                     err = await r.text()
                     raise HermesUnreachableError(f"minimax {r.status}: {err[:200]}")
                 data = await r.json()
-                # M2.7-highspeed 响应可能含 thinking 块 + text 块 · 只取 text
+                # M2.7-highspeed 响应: content = [{type:thinking,...}, {type:text,text:...}]
+                # 只取 text 块 · thinking 是内部推理不能发客户
                 content = data.get("content", [])
                 if isinstance(content, list):
-                    return "".join(c.get("text", "") for c in content if c.get("type") == "text")
+                    text = "".join(c.get("text", "") for c in content if c.get("type") == "text")
+                    if text:
+                        return text
+                    # text 块为空 · 退化:stop_reason=max_tokens 说明 thinking 吃完了 · 不该发 thinking
+                    stop_reason = data.get("stop_reason", "")
+                    raise HermesUnreachableError(
+                        f"minimax M2.7 returned empty text (stop_reason={stop_reason} · thinking overflow)"
+                    )
                 return ""
 
     async def _chat_openai(self, prompt, max_tokens, temperature, system):
@@ -354,25 +365,97 @@ class LocalVLLMClient(BaseLLMClient):
                 return data["choices"][0]["text"]
 
 
+class Route302Client(BaseLLMClient):
+    """302.AI 聚合 API · 一 key 调 DeepSeek V4 / GLM-5.1 / 豆包 Seed-2 / Qwen3.6 等 100+ 模型。
+
+    OpenAI 兼容协议 · Base URL: https://api.302.ai/v1
+    申请: https://302.ai/ · 文档: https://doc-en.302.ai/
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        model: str = "deepseek-chat",
+        name: Optional[str] = None,
+        mock: bool = False,
+    ):
+        self.api_key = api_key or os.getenv("OPENAI_302_API_KEY")
+        self.base_url = base_url or os.getenv("OPENAI_302_BASE_URL") or "https://api.302.ai/v1"
+        self.model = model
+        self.name = name or f"route302_{model.replace('-', '_').replace('.', '_')}"
+        self.mock = mock or not self.api_key
+
+    async def chat(
+        self,
+        prompt: str,
+        max_tokens: int = 300,
+        temperature: float = 0.7,
+        system: Optional[str] = None,
+    ) -> str:
+        if self.mock:
+            return f"[mock·{self.name}] {prompt[:30]}... → 302 聚合回复"
+
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        url = f"{self.base_url}/chat/completions"
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        body = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as s:
+            async with s.post(url, headers=headers, json=body) as r:
+                if r.status >= 500:
+                    raise HermesUnreachableError(f"302.ai 5xx: {r.status}")
+                if r.status >= 400:
+                    err = await r.text()
+                    raise HermesUnreachableError(f"302.ai {r.status}: {err[:200]}")
+                data = await r.json()
+                return data["choices"][0]["message"]["content"]
+
+
+# 302.AI 路由的 model 常量（2026-04-18 锁定 · 连大哥 5 场景）
+ROUTE_302_MODELS = {
+    "deepseek_v4": "deepseek-chat",           # 高意向/大额客户 · 中文销售话术最强
+    "deepseek_r1": "deepseek-reasoner",       # 推理/纠错/长文档
+    "glm_51": "glm-4.5",                       # 情感/投诉/共情 · 中文共情第一
+    "doubao_seed2": "doubao-seed-1-6-pro",    # 朋友圈图文 · 多媒体最强
+    "qwen36_plus": "qwen-max-latest",          # 备用 · OCR/多模态
+}
+
+
 class LLMRegistry:
     """统一注册中心 · model_router 通过 name 获取 client。"""
 
     def __init__(self):
         self._clients: dict[str, BaseLLMClient] = {}
+        self._aliases: dict[str, str] = {}
 
     def register(self, client: BaseLLMClient) -> None:
         self._clients[client.name] = client
 
+    def register_alias(self, alias: str, target_name: str) -> None:
+        """Wave 5 · 给已注册 client 加别名(M4 router v4 用)。"""
+        self._aliases[alias] = target_name
+
     def get(self, name: str) -> BaseLLMClient:
-        if name not in self._clients:
-            raise KeyError(f"LLM client '{name}' not registered")
-        return self._clients[name]
+        if name in self._clients:
+            return self._clients[name]
+        if name in self._aliases:
+            return self._clients[self._aliases[name]]
+        raise KeyError(f"LLM client '{name}' not registered")
 
     def has(self, name: str) -> bool:
-        return name in self._clients
+        return name in self._clients or name in self._aliases
 
     def list_available(self) -> list[str]:
-        return list(self._clients.keys())
+        return list(self._clients.keys()) + list(self._aliases.keys())
 
 
 def build_default_registry(mock: bool = False) -> LLMRegistry:
@@ -391,7 +474,17 @@ def build_default_registry(mock: bool = False) -> LLMRegistry:
     for klass, env_var in candidates:
         if mock or os.getenv(env_var):
             reg.register(klass(mock=mock))
+
+    # 302.AI 聚合 · 注册 5 个 variant(连大哥 5 场景锁定)
+    if mock or os.getenv("OPENAI_302_API_KEY"):
+        for alias, model_id in ROUTE_302_MODELS.items():
+            reg.register(Route302Client(model=model_id, name=f"route302_{alias}", mock=mock))
+
     reg.register(LocalVLLMClient(mock=True))
+
+    # Wave 5 M4 · MiniMax M2.7 Token Plan 别名(router v4 返回这个名字)
+    if reg.has("minimax_m25_lightning"):
+        reg.register_alias("minimax_m27_tokenplan", "minimax_m25_lightning")
     return reg
 
 
