@@ -56,18 +56,39 @@ def _compute_reply_latency() -> float:
 
 
 async def _dispatch_reply(account_id: str, from_wxid: str, inbound) -> None:
-    """独立 coroutine: AI 生成 → 拟真 sleep → 发送. 不阻塞 sync loop polling."""
+    """独立 coroutine: AI 生成 → 拟真 sleep → 发送(先图后文). 不阻塞 sync loop polling.
+
+    Wave 14 · AI 可在 text 里内嵌 [[IMG:filename]] · 本函数正则扫出 · 先发图后发文.
+    """
     try:
         from server.main import inbound as _handler   # late import 防循环
+        from server.media_library import extract_image_refs, pick_by_filename
+
         suggestion = await _handler(inbound)
         if not suggestion or not getattr(suggestion, "text", ""):
             return
-        reply = suggestion.text
+
+        raw_reply = suggestion.text
+        clean_text, image_filenames = extract_image_refs(raw_reply)
+
         latency = _compute_reply_latency()
-        logger.warning("⏳ wait %.1fs before reply to=%s", latency, from_wxid)
+        logger.warning("⏳ wait %.1fs before reply to=%s imgs=%d", latency, from_wxid, len(image_filenames))
         await _asyncio.sleep(latency)
-        ok = await wxpad_send_text(account_id, from_wxid, reply)
-        logger.warning("✉️ auto reply to=%s ok=%s lat=%.1fs text=%s", from_wxid, ok, latency, reply[:80])
+
+        # 先发图(每张间 0.5s) · 后发文
+        for fn in image_filenames:
+            img_path = pick_by_filename(inbound.tenant_id, fn)
+            if img_path is None:
+                logger.warning("🖼 img not found tenant=%s fn=%s · skip", inbound.tenant_id, fn)
+                continue
+            img_ok = await wxpad_send_image(account_id, from_wxid, str(img_path))
+            logger.warning("🖼 auto reply img to=%s fn=%s ok=%s", from_wxid, fn, img_ok)
+            await _asyncio.sleep(0.5)
+
+        if clean_text:
+            ok = await wxpad_send_text(account_id, from_wxid, clean_text)
+            logger.warning("✉️ auto reply to=%s ok=%s lat=%.1fs text=%s",
+                           from_wxid, ok, latency, clean_text[:80])
     except Exception as e:
         logger.exception("dispatch reply err: %s", e)
 
@@ -556,6 +577,47 @@ async def wxpad_send_text(account_id: str, to_wxid: str, text: str) -> bool:
         items = resp.get("Data") or []
         ok = any(it.get("isSendSuccess") for it in items) if isinstance(items, list) else False
     logger.info("wxpad send text account=%s to=%s ok=%s", account_id, to_wxid, ok)
+    return ok
+
+
+async def wxpad_send_image(account_id: str, to_wxid: str, image_path: str) -> bool:
+    """Wave 14 · 发图到小号. image_path 为服务器本地文件路径. base64 编码后调 WxPadPro.
+
+    WxPadPro SendImageMessage body: MsgItem 数组 · ToUserName + ImageContent(base64) + MsgType=3.
+    """
+    import base64
+    from pathlib import Path as _P
+
+    p = _P(image_path)
+    if not p.exists() or not p.is_file():
+        logger.warning("wxpad send image: file missing %s", image_path)
+        return False
+
+    async with session_scope() as session:
+        acc = (await session.execute(
+            select(WxAccount).where(WxAccount.account_id == account_id)
+        )).scalar_one_or_none()
+        if not acc or not acc.auth_key:
+            return False
+
+    try:
+        b64 = base64.b64encode(p.read_bytes()).decode("ascii")
+    except Exception as e:
+        logger.warning("wxpad send image: read/encode failed %s: %s", image_path, e)
+        return False
+
+    resp = await _wxpad_api(
+        "POST",
+        "/message/SendImageMessage",
+        {"MsgItem": [{"ToUserName": to_wxid, "ImageContent": b64, "MsgType": 3}]},
+        key=acc.auth_key,
+        timeout=30.0,
+    )
+    ok = False
+    if resp and resp.get("Code") == 200:
+        items = resp.get("Data") or []
+        ok = any(it.get("isSendSuccess") for it in items) if isinstance(items, list) else False
+    logger.info("wxpad send image account=%s to=%s file=%s ok=%s", account_id, to_wxid, p.name, ok)
     return ok
 
 

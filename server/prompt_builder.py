@@ -21,7 +21,7 @@ SYSTEM_PROMPT_TEMPLATE = """你是 {boss_name} 的微信回复助手。
 {style_hints}{style_pack_block}
 {industry_block}{customer_profile_block}
 {knowledge_block}
-{psych_block}{few_shot_block}{special_rules_block}{stage_block}
+{psych_block}{few_shot_block}{special_rules_block}{stage_block}{media_block}
 
 # 当前对话
 - 客户称呼：{sender_name}
@@ -220,6 +220,7 @@ def build_system_prompt(
     industry_shared_pack: dict | None = None,
     override_prompt: str = "",
     stage_block: str = "",
+    media_block: str = "",
 ) -> str:
     """构建完整 system prompt · 防幻觉 + 风格继承 + 风险约束 + 客户档案 + 知识库 + 情绪 + 行业 + 心理学 + Wave 5 (style_pack / few-shot / special_rules) + Wave 8 (industry_shared_pack) + Wave 11 (stage_block).
 
@@ -270,6 +271,7 @@ def build_system_prompt(
         few_shot_block=few_shot_section,
         special_rules_block=special_rules_section,
         stage_block=("\n" + stage_block) if stage_block else "",
+        media_block=("\n" + media_block) if media_block else "",
         override_block=override_block,
         risk_specific=_RISK_BLOCKS.get(intent.risk, _RISK_BLOCKS[RiskEnum.LOW]),
         emotion_specific=_EMOTION_BLOCKS.get(intent.emotion, _EMOTION_BLOCKS[EmotionEnum.CALM]),

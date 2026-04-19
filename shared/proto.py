@@ -51,6 +51,8 @@ class Suggestion(BaseModel):
     similarity_check_passed: bool = True
     rewrite_count: int = 0
     forbidden_word_hit: bool = False
+    # Wave 14 · AI 用 [[IMG:filename]] 引用 · generator 解析后填入 · _dispatch_reply 先发图再发文
+    image_filenames: list[str] = Field(default_factory=list)
 
     @field_validator("text")
     @classmethod

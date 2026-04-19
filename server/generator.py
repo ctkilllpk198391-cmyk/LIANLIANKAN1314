@@ -44,7 +44,49 @@ class ReplyGenerator:
         tenant = self.tenants.get(msg.tenant_id)
         route = self.router.route(msg.tenant_id, intent)
 
-        # 集中 prompt · 防地理/家庭/年龄幻觉 · 风格继承 + 客户档案 + RAG + 行业 + 心理学
+        # Wave 10: 加载 tenant 训练产物(style_pack / dialogue_bank / faq_bank)
+        style_pack = None
+        few_shot_block = ""
+        special_rules = ""
+        try:
+            from pathlib import Path as _Path
+            lora_root = _Path(f"tenants/{msg.tenant_id}/boss_super_lora")
+
+            # style_pack.json
+            sp_path = lora_root / "style_pack.json"
+            if sp_path.exists():
+                import json as _json
+                style_pack = _json.loads(sp_path.read_text(encoding="utf-8"))
+
+            # dialogue_bank: BGE few-shot 检索
+            db_path = lora_root / "dialogue_bank.jsonl"
+            if db_path.exists():
+                from server.dialogue_bank import DialogueBank
+                bank = DialogueBank(msg.tenant_id, bank_path=db_path)
+                bank.load()
+                if bank.pairs:
+                    top_pairs = bank.retrieve(msg.text, top_k=5)
+                    few_shot_block = bank.to_few_shot_block(top_pairs)
+
+            # faq_bank: 如果有对应 FAQ 也注入到 knowledge
+            faq_path = lora_root / "faq_bank.json"
+            if faq_path.exists():
+                import json as _json
+                faq_data = _json.loads(faq_path.read_text(encoding="utf-8"))
+                if isinstance(faq_data, dict) and faq_data.get("faqs"):
+                    special_rules = str(faq_data.get("special_rules", ""))
+        except Exception as e:
+            logger.debug("wave10 tenant data load failed (non-blocking): %s", e)
+
+        # Wave 14 · 素材库 block · 让 AI 知道可引用哪些图
+        media_block = ""
+        try:
+            from server.media_library import render_prompt_block as _render_media_block
+            media_block = _render_media_block(msg.tenant_id)
+        except Exception as e:
+            logger.debug("wave14 media block load failed (non-blocking): %s", e)
+
+        # 集中 prompt · 防地理/家庭/年龄幻觉 · 风格继承 + 客户档案 + RAG + 行业 + 心理学 + 素材库
         system = build_system_prompt(
             boss_name=tenant.boss_name,
             style_hints=tenant.style_hints,
@@ -54,6 +96,10 @@ class ReplyGenerator:
             knowledge_block=knowledge_block,
             industry_block=industry_block,
             psych_block=psych_block,
+            style_pack=style_pack,
+            few_shot_block=few_shot_block,
+            special_rules=special_rules,
+            media_block=media_block,
         )
         prompt = build_user_prompt(msg.sender_name, msg.text)
 
