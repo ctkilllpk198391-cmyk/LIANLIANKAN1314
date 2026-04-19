@@ -14,6 +14,9 @@ class IntentEnum(str, Enum):
     CHITCHAT = "chitchat"
     SENSITIVE = "sensitive"
     UNKNOWN = "unknown"
+    # Wave 14 · 成交引导 · 细分购买阶段
+    PURCHASE_SIGNAL = "purchase_signal"  # 明确购买意向 · 未下单 · "要一份"/"怎么买"
+    HESITATION = "hesitation"            # 犹豫 · "想想"/"再看看"/"太贵"
 
 
 class RiskEnum(str, Enum):

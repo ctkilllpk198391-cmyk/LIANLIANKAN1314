@@ -132,7 +132,7 @@ async def test_scenario_4_complaint_high_risk_blocked(e2e_client):
 
 @pytest.mark.asyncio
 async def test_scenario_5_order_triggers_followup(e2e_client):
-    r = await e2e_client.post("/v1/inbound", json=_payload("我要下单", chat_id="chat_order"))
+    r = await e2e_client.post("/v1/inbound", json=_payload("我付款了", chat_id="chat_order"))
     assert r.status_code == 200
     assert r.json()["intent"]["intent"] == "order"
 
@@ -144,9 +144,9 @@ async def test_scenario_5_order_triggers_followup(e2e_client):
             .where(FollowUpTask.chat_id == "chat_order")
         )).scalars().all()
         types = {r.task_type for r in rows}
-        # 至少 4 个 task_type 中的 unpaid_30min 应该被创建
+        # Wave 12 安全档 · 2 步温和跟进 (unpaid_30min + satisfaction_7d)
         assert "unpaid_30min" in types
-        assert len(rows) == 4
+        assert len(rows) == 2
 
 
 # ─── 场景 6 · 长尾询价 + RAG 召回（先 ingest 产品库）────────────────────

@@ -22,10 +22,19 @@ INTENT_KEYWORDS: dict[IntentEnum, list[str]] = {
     IntentEnum.GREETING: ["在么", "在吗", "你好", "hello", "hi", "您好", "早上好", "晚上好"],
     IntentEnum.INQUIRY: ["多少钱", "价格", "怎么卖", "什么价", "报价", "几折", "优惠"],
     IntentEnum.NEGOTIATION: ["便宜", "贵了", "再便宜", "降点", "包邮", "送点", "划算", "比比"],
-    IntentEnum.ORDER: ["要了", "下单", "买", "付款", "转账", "收款", "拍下", "确认"],
-    IntentEnum.COMPLAINT: ["差评", "投诉", "退款", "假货", "骗子", "举报", "12315", "维权"],
-    IntentEnum.SENSITIVE: ["合同", "发票", "退货", "退款", "追责", "律师", "法院"],
+    IntentEnum.ORDER: ["付款了", "转账了", "拍下了", "打款了", "收款码", "确认收货", "已付", "已拍"],
+    IntentEnum.COMPLAINT: ["差评", "投诉", "假货", "骗子", "举报", "12315", "维权"],
+    IntentEnum.SENSITIVE: ["合同", "发票", "退货", "追责", "律师", "法院"],
     IntentEnum.CHITCHAT: ["哈哈", "嗯嗯", "好的", "知道了", "谢谢", "ok", "okay"],
+    # Wave 14 · 购买信号 + 犹豫
+    IntentEnum.PURCHASE_SIGNAL: [
+        "怎么买", "要一份", "来一个", "要一个", "我要", "想要", "下单",
+        "怎么付", "怎么下单", "在哪买", "怎么拍", "买一个", "订一个", "来一份",
+    ],
+    IntentEnum.HESITATION: [
+        "想想", "考虑", "再看看", "太贵", "贵了点", "有点贵", "犹豫",
+        "看看再说", "纠结", "下次", "再说吧", "先不", "暂时不",
+    ],
 }
 
 RISK_INTENT_MAP = {
@@ -33,6 +42,8 @@ RISK_INTENT_MAP = {
     IntentEnum.COMPLAINT: RiskEnum.HIGH,
     IntentEnum.ORDER: RiskEnum.MEDIUM,
     IntentEnum.NEGOTIATION: RiskEnum.MEDIUM,
+    IntentEnum.PURCHASE_SIGNAL: RiskEnum.MEDIUM,
+    IntentEnum.HESITATION: RiskEnum.LOW,
     IntentEnum.INQUIRY: RiskEnum.LOW,
     IntentEnum.GREETING: RiskEnum.LOW,
     IntentEnum.CHITCHAT: RiskEnum.LOW,
@@ -141,7 +152,7 @@ class IntentClassifier:
             "判断客户消息的意图、情绪、风险等级。只返回 JSON · 不要解释。\n"
             f"消息：{text}{history_str}\n\n"
             "返回 JSON 格式（不要任何前缀/后缀）：\n"
-            '{"intent": "greeting|inquiry|negotiation|order|complaint|chitchat|sensitive|unknown", '
+            '{"intent": "greeting|inquiry|negotiation|purchase_signal|hesitation|order|complaint|chitchat|sensitive|unknown", '
             '"emotion": "calm|anxious|angry|excited", '
             '"risk": "low|medium|high", '
             '"confidence": 0.0-1.0}'

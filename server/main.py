@@ -30,7 +30,7 @@ from server.marketing_plan import (
 from server.cross_sell import CrossSellEngine
 from server.industry_router import IndustryRouter
 from server.message_splitter import split_messages
-from server.moments_manager import MomentsManager
+# Wave 12 · MomentsManager 已删(朋友圈能力废)
 from server.psych_triggers import recommend as psych_recommend
 from server.typing_pacer import (
     is_nighttime,
@@ -97,7 +97,6 @@ class App:
     account_failover: AccountFailover
     vlm: QwenVLClient
     asr: DoubaoASRClient
-    moments: MomentsManager
     industry_router: IndustryRouter
     cross_sell: CrossSellEngine
     pipeline_builder: CustomerPipelineBuilder
@@ -191,11 +190,7 @@ def _init_components() -> None:
     # S5 语音转文字 · mock fallback 自动生效（无 key 或 BAIYANG_ASR_MOCK=true）
     state.asr = DoubaoASRClient()
 
-    # S8 朋友圈托管
-    state.moments = MomentsManager(
-        llm_client=state.hermes,
-        ws_push=ws_manager.push,
-    )
+    # Wave 12 · S8 朋友圈托管已删 · 连大哥决策: 客户不需要朋友圈
 
     # SDW S3 行业模板池
     state.industry_router = IndustryRouter()
@@ -231,7 +226,6 @@ def _start_scheduler() -> None:
     init_scheduler(
         health_tick=state.health_monitor.tick_all,
         follow_up_tick=state.follow_up.tick,
-        moments_tick=state.moments.tick,
     )
 
 
@@ -240,6 +234,12 @@ async def lifespan(app: FastAPI):
     await _init_db()
     _init_components()
     _start_scheduler()
+    # Wave 13 · 恢复所有 online 账号的消息同步
+    try:
+        from server.wxpadpro_bridge import resume_sync_loops_on_startup
+        await resume_sync_loops_on_startup()
+    except Exception as _e:
+        logger.warning("resume_sync_loops failed: %s", _e)
     try:
         yield
     finally:
@@ -251,6 +251,50 @@ app = FastAPI(
     version=VERSION,
     lifespan=lifespan,
 )
+
+# ─── Wave 6 · 租户 Dashboard 路由 ─────────────────────────────────────────────
+from server.tenant_dashboard import router as tenant_dashboard_router  # noqa: E402
+app.include_router(tenant_dashboard_router)
+
+# ─── Wave 7 · Gewechat Webhook 路由 ──────────────────────────────────────────
+from server.wxpadpro_bridge import router as wxpadpro_router  # noqa: E402
+app.include_router(wxpadpro_router)
+
+# ─── Wave 9 · 客户注册/登录/激活/裂变/视图路由 ───────────────────────────────
+from server.signup_login_api import router as signup_login_router  # noqa: E402
+from server.activate_api import router as activate_api_router  # noqa: E402
+from server.referral_api import router as referral_api_router  # noqa: E402
+from server.view_routes import router as view_routes_router  # noqa: E402
+app.include_router(signup_login_router)
+app.include_router(activate_api_router)
+app.include_router(referral_api_router)
+app.include_router(view_routes_router)
+
+# ─── Wave 10 · 训练自动化管线 + 通知 + 试用管理 ──────────────────────────────
+from server.training_api import router as training_api_router  # noqa: E402
+app.include_router(training_api_router)
+
+# ─── Wave 11 · 主动销售 + 合规 + 沙盒 + 模式 + 飞书bot ────────────────────────
+from server.proactive_api import router as proactive_api_router  # noqa: E402
+app.include_router(proactive_api_router)
+
+# ─── Wave 11 F9 · 违禁词合规改造 ───────────────────────────────────────────
+from server.compliance_api import router as compliance_api_router  # noqa: E402
+app.include_router(compliance_api_router)
+
+# ─── Wave 11 丁 · 飞书 Bot + 员工状态 API ────────────────────────────────────
+from server.feishu_admin_bot import router as feishu_bot_router  # noqa: E402
+from server.accounts_status_api import router as accounts_status_router  # noqa: E402
+app.include_router(feishu_bot_router)
+app.include_router(accounts_status_router)
+
+# ─── Wave 11 丙 · F1 Sandbox + F2 Moments + F7 Modes ─────────────────────────
+from server.sandbox_api import router as sandbox_api_router  # noqa: E402
+# Wave 12 · moments_api 已删
+from server.modes_api import router as modes_api_router  # noqa: E402
+app.include_router(sandbox_api_router)
+# Wave 12 · moments_api_router 已删
+app.include_router(modes_api_router)
 
 
 # ─── 错误统一映射 ──────────────────────────────────────────────────────────
@@ -493,9 +537,9 @@ async def inbound(msg: InboundMsg):
 
     asyncio.create_task(state.auto_send_decider.handle_decision(decision, tenant_cfg))
 
-    # F4 订单意图 → 自动安排 4 步跟进
+    # F4 订单 + Wave 14 购买意向 → 自动安排跟进序列
     from shared.types import IntentEnum as _IE
-    if intent.intent == _IE.ORDER:
+    if intent.intent in (_IE.ORDER, _IE.PURCHASE_SIGNAL):
         asyncio.create_task(
             state.follow_up.schedule_after_order(
                 msg.tenant_id, msg.chat_id, sender_name=msg.sender_name
@@ -993,40 +1037,8 @@ async def weekly_report_send(tenant_id: str):
     return {"ok": result["ok"], "tenant_id": tenant_id, "mode": result.get("mode", "unknown")}
 
 
-# ─── S8 朋友圈托管 ──────────────────────────────────────────────────────────
-
-class MomentsDraftRequest(BaseModel):
-    context: Optional[str] = None
-
-
-@app.post("/v1/moments/{tenant_id}/draft")
-async def moments_draft(tenant_id: str, post_type: str, body: MomentsDraftRequest = MomentsDraftRequest()):
-    """生成文案 + 入库 draft。"""
-    if not state.tenants.has(tenant_id):
-        raise HTTPException(status_code=404, detail=f"tenant {tenant_id} unknown")
-    if post_type not in state.moments.POST_PROMPTS:
-        raise HTTPException(status_code=400, detail=f"invalid post_type: {post_type}")
-    content = await state.moments.generate_post(tenant_id, post_type, context=body.context)
-    post_id = await state.moments._save_post(tenant_id, post_type, content, status="draft")
-    return {"ok": True, "post_id": post_id, "content": content, "status": "draft"}
-
-
-@app.get("/v1/moments/{tenant_id}")
-async def moments_list(tenant_id: str, status: Optional[str] = None, limit: int = 50):
-    """查询朋友圈列表。"""
-    if not state.tenants.has(tenant_id):
-        raise HTTPException(status_code=404, detail=f"tenant {tenant_id} unknown")
-    posts = await state.moments.list_posts(tenant_id, status=status, limit=limit)
-    return {"tenant_id": tenant_id, "posts": posts}
-
-
-@app.post("/v1/moments/{post_id}/publish")
-async def moments_publish(post_id: str):
-    """触发发布 + ws push。"""
-    ok = await state.moments.publish(post_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail=f"post {post_id} not found or not publishable")
-    return {"ok": True, "post_id": post_id}
+# Wave 12 · 朋友圈托管已废 (连大哥决策: 客户不需要朋友圈能力)
+# 历史路由 /v1/moments/* 全删 · 对应 moments_manager / moments_api / sns_* 模块已删.
 
 
 # ─── WebSocket 推送 ─────────────────────────────────────────────────────────
@@ -1246,6 +1258,70 @@ async def get_version():
     """返回最新版本信息 · 供客户端自动更新（F3）使用。"""
     from server.version_api import get_version_info  # noqa: PLC0415
     return get_version_info()
+
+
+# ─── Wave 8 · 行业飞轮同意管理路由 ──────────────────────────────────────────
+
+class ConsentGrantBody(BaseModel):
+    signed_at: Optional[int] = None  # Unix ms · 默认 server time
+
+
+@app.post("/v1/consent/{tenant}/grant/{consent_type}")
+async def consent_grant(tenant: str, consent_type: str, body: ConsentGrantBody = ConsentGrantBody()):
+    """记录 tenant 明确同意参与某类数据共享（如 industry_flywheel）。
+
+    默认 OFF · 必须调用此接口才启用飞轮贡献。
+    """
+    from server.consent_manager import ConsentManager, CONSENT_TYPES
+    if consent_type not in CONSENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"不支持的 consent_type: {consent_type}，有效值: {list(CONSENT_TYPES)}")
+    cm = ConsentManager(tenant)
+    cm.grant(tenant, consent_type=consent_type, signed_at=body.signed_at)
+    await audit.log(
+        actor="boss", action="consent_grant",
+        tenant_id=tenant, meta={"consent_type": consent_type},
+    )
+    return {"ok": True, "tenant_id": tenant, "consent_type": consent_type, "active": True}
+
+
+@app.post("/v1/consent/{tenant}/revoke/{consent_type}")
+async def consent_revoke(tenant: str, consent_type: str):
+    """撤回 tenant 的数据共享同意 · 24h 内清理飞轮数据。"""
+    from server.consent_manager import ConsentManager, CONSENT_TYPES
+    from server.industry_flywheel import IndustryFlywheel
+    if consent_type not in CONSENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"不支持的 consent_type: {consent_type}")
+    cm = ConsentManager(tenant)
+    cm.revoke(tenant, consent_type=consent_type)
+
+    # 飞轮数据立即清理（同意撤回 = 立即删除贡献）
+    removed = 0
+    if consent_type == "industry_flywheel":
+        try:
+            flywheel = IndustryFlywheel()
+            removed = flywheel.revoke(tenant)
+        except Exception as e:
+            logger.warning("飞轮数据清理失败（非阻塞）: %s", e)
+
+    await audit.log(
+        actor="boss", action="consent_revoke",
+        tenant_id=tenant, meta={"consent_type": consent_type, "flywheel_removed": removed},
+    )
+    return {
+        "ok": True, "tenant_id": tenant, "consent_type": consent_type,
+        "active": False, "flywheel_removed": removed,
+    }
+
+
+@app.get("/v1/consent/{tenant}")
+async def consent_status(tenant: str):
+    """查询 tenant 的所有同意状态。"""
+    from server.consent_manager import ConsentManager, CONSENT_TYPES
+    cm = ConsentManager(tenant)
+    result = {}
+    for ctype in CONSENT_TYPES:
+        result[ctype] = cm.has_consent(ctype)
+    return {"tenant_id": tenant, "consents": result}
 
 
 def run() -> None:
