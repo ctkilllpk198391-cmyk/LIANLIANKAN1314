@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
 
 from client.api_client import ServerAPIClient
 from shared.proto import InboundMsg, Suggestion
@@ -22,7 +22,7 @@ class WeChatWatcher:
         server_url: str,
         tenant_id: str,
         mock: bool = False,
-        on_suggestion: Optional[OnSuggestionCallback] = None,
+        on_suggestion: OnSuggestionCallback | None = None,
     ):
         self.tenant_id = tenant_id
         self.mock = mock
@@ -57,48 +57,61 @@ class WeChatWatcher:
                     "\n\n这是打包问题, 请反馈技术团队. 桌面 wxagent_*.txt 已写诊断报告."
                 )
 
-            # 实例化: 失败如果是"主窗口未找到/未登录" → 轮询等微信打开 (用户友好)
-            # 不是 traceback 闪退
+            # 实例化失败时, 真打印客户机微信版本 + wxauto4 真支持版本
+            # wxauto4 v41.1.2 真支持: 微信 4.0.5.13 / 4.0.5.26 (cluic/wxauto4 issue #7 maintainer 真回复)
             import time
             mod_name, desc, WeChatCls = usable[0]
-            print("=" * 60, flush=True)
-            print("⚠️  请确保微信 PC 客户端已打开并登录", flush=True)
-            print("    程序将等待微信启动 (最多 5 分钟)...", flush=True)
-            print("=" * 60, flush=True)
-            logger.info("尝试引擎: %s (%s) · 等待微信主窗口", mod_name, desc)
-            max_retries = 60  # 60 * 5s = 5 min
-            last_err = None
-            for i in range(max_retries):
-                try:
-                    self._wx = WeChatCls()
-                    self._engine_name = mod_name
-                    logger.info("✅ 微信自动化引擎激活: %s (尝试 %d 次)", mod_name, i + 1)
-                    print(f"✅ 微信已连接, 开始监听消息", flush=True)
-                    return
-                except Exception as e:
-                    last_err = e
-                    err_str = str(e)
-                    is_no_window = ('未找到' in err_str or '主窗口' in err_str or
-                                     '登录' in err_str or 'NotFound' in err_str or
-                                     'window' in err_str.lower())
-                    if is_no_window and i < max_retries - 1:
-                        if i % 6 == 0:  # 每 30s 提示一次
-                            print(f"等待微信主窗口... ({i*5}s/{max_retries*5}s) — 请打开微信 PC 客户端并登录", flush=True)
-                        time.sleep(5)
-                        continue
-                    if not is_no_window:
-                        # 非主窗口类错误 (如杀毒拦截), 直接 raise
-                        logger.error("引擎 %s 真实失败: %s", mod_name, e, exc_info=True)
-                        raise RuntimeError(
-                            f"微信自动化引擎 {mod_name} 启动失败:\n  {type(e).__name__}: {e}\n\n"
-                            "常见原因: (1) Windows 杀毒拦截 uiautomation (2) 微信版本 < 4.x (3) 权限不足"
-                        ) from e
-                    time.sleep(5)
-            # 5 min 超时
-            raise RuntimeError(
-                f"等待微信主窗口超时 (5 分钟):\n  {last_err}\n\n"
-                "请: (1) 启动微信 PC 客户端 (2) 完成登录 (3) 重新启动本程序"
-            )
+            try:
+                self._wx = WeChatCls()
+                self._engine_name = mod_name
+                logger.info("✅ 微信自动化引擎激活: %s", mod_name)
+                print("✅ 微信已连接, 开始监听消息", flush=True)
+                return
+            except Exception as e:
+                err_str = str(e)
+                is_no_window = ('未找到' in err_str or '主窗口' in err_str or
+                                 '登录' in err_str or 'NotFound' in err_str or
+                                 'window' in err_str.lower())
+                if is_no_window:
+                    # 真根因: wxauto4 hardcoded ClassName 不匹配客户机微信版本
+                    # 给客户精准诊断 — 客户机微信版本 + wxauto4 真支持版本
+                    try:
+                        from client.version_probe import detect_wechat_version
+                        wx_ver = detect_wechat_version() or "未探测到"
+                    except Exception:
+                        wx_ver = "未探测到"
+                    # 列出客户机所有微信进程
+                    proc_info = ""
+                    try:
+                        import psutil  # type: ignore
+                        wx_procs = []
+                        for p in psutil.process_iter(['name', 'exe']):
+                            n = (p.info.get('name') or '').lower()
+                            if n in ('weixin.exe', 'wechat.exe'):
+                                wx_procs.append(f"  - {p.info.get('name')} @ {p.info.get('exe')}")
+                        proc_info = "\n".join(wx_procs) if wx_procs else "  (未发现微信进程)"
+                    except Exception as pe:
+                        proc_info = f"  (psutil 探测失败: {pe})"
+                    diag = (
+                        f"❌ wxauto4 找不到微信主窗口\n\n"
+                        f"客户机微信版本: {wx_ver}\n"
+                        f"客户机微信进程:\n{proc_info}\n\n"
+                        f"━━━━━━ 真根因 ━━━━━━\n"
+                        f"wxauto4 v41.1.2 仅支持微信 4.0.5.13 或 4.0.5.26 这两个特定版本.\n"
+                        f"(来源: github.com/cluic/wxauto4 issue #7 maintainer 回复)\n\n"
+                        f"━━━━━━ 解决 ━━━━━━\n"
+                        f"装微信 4.0.5.26 (wxauto4 真支持):\n"
+                        f"  https://github.com/SiverKing/wechat4.0-windows-versions/releases\n\n"
+                        f"原始报错: {type(e).__name__}: {e}\n"
+                    )
+                    logger.error(diag)
+                    raise RuntimeError(diag) from e
+                # 非主窗口错 (杀毒拦截 / 权限不足)
+                logger.error("引擎 %s 真实失败: %s", mod_name, e, exc_info=True)
+                raise RuntimeError(
+                    f"微信自动化引擎 {mod_name} 启动失败:\n  {type(e).__name__}: {e}\n\n"
+                    "常见原因: (1) Windows 杀毒拦截 uiautomation (2) 微信版本不兼容 (3) 权限不足"
+                ) from e
 
     async def start(self) -> None:
         self._ensure_wx()

@@ -19,14 +19,18 @@ DEFAULT_VERSION_RANGES: dict[str, str] = {
 
 
 def detect_wechat_version() -> Optional[str]:
-    """Windows: 读 WeChat.exe 的 FileVersion · macOS: 返回 None（mock）。"""
+    """Windows: 探测微信 PC 版本 (Weixin.exe 4.x / WeChat.exe 3.x)。
+    macOS: 返回 None（mock）。"""
     if platform.system() != "Windows":
         return None
 
     try:
         import win32api  # type: ignore
 
+        # 微信 4.x 国内版 = Weixin.exe (改名了); 老版 3.x = WeChat.exe
         candidates = [
+            "C:\\Program Files\\Tencent\\Weixin\\Weixin.exe",
+            "C:\\Program Files (x86)\\Tencent\\Weixin\\Weixin.exe",
             "C:\\Program Files\\Tencent\\WeChat\\WeChat.exe",
             "C:\\Program Files (x86)\\Tencent\\WeChat\\WeChat.exe",
         ]
@@ -36,8 +40,24 @@ def detect_wechat_version() -> Optional[str]:
                 ms = info["FileVersionMS"]
                 ls = info["FileVersionLS"]
                 v = f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}.{ls & 0xFFFF}"
-                logger.info("detected WeChat version: %s", v)
+                logger.info("detected WeChat version: %s @ %s", v, path)
                 return v
+        # 兜底: 找正在跑的进程
+        try:
+            import psutil  # type: ignore
+            for proc in psutil.process_iter(['name', 'exe']):
+                name = (proc.info.get('name') or '').lower()
+                if name in ('weixin.exe', 'wechat.exe'):
+                    exe = proc.info.get('exe')
+                    if exe and Path(exe).exists():
+                        info = win32api.GetFileVersionInfo(exe, "\\")
+                        ms = info["FileVersionMS"]
+                        ls = info["FileVersionLS"]
+                        v = f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}.{ls & 0xFFFF}"
+                        logger.info("detected WeChat version (via process): %s @ %s", v, exe)
+                        return v
+        except Exception as e:
+            logger.warning("psutil probe failed: %s", e)
     except Exception as e:
         logger.warning("version probe failed: %s", e)
 
