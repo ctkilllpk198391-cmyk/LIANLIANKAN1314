@@ -31,12 +31,14 @@ for pkg in [
     except Exception as e:
         print(f"[spec] WARN: collect_all({pkg}) failed: {e}")
 
-# wxauto 系列 + pywin32 + uiautomation 只在 Windows 收集
+# wxauto4 (唯一开源引擎 in pypi v41.1.2) + 真依赖全 collect_all 防漏
+# wxauto/wxautox/wxautox4 不在 pypi (商业版 plus.wxauto.org), 已从 watcher.py 移除
 if sys.platform == 'win32':
     win_pkgs = [
-        'wxautox4', 'wxauto4', 'wxautox', 'wxauto',  # 4 个引擎都打包,运行时 fallback
+        'wxauto4',  # 微信 4.x 开源
+        'colorama', 'comtypes', 'PIL', 'psutil', 'pyperclip', 'tenacity',  # wxauto4 真依赖
         'uiautomation',  # 微信 4.1 直接控件树访问
-        'win32api', 'win32con', 'win32gui', 'pywintypes', 'comtypes',
+        'win32api', 'win32con', 'win32gui', 'pywintypes',
     ]
     for pkg in win_pkgs:
         try:

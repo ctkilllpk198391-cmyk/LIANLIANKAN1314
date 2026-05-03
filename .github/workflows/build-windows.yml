@@ -32,19 +32,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller==6.11.1 appdirs setuptools
           pip install fastapi pydantic aiohttp httpx sqlalchemy aiosqlite python-dotenv pyyaml humancursor pywin32 uiautomation
-          # 仅装开源 wxauto / wxauto4 (wxautox 商业版要付费授权 plus.wxauto.org, 测试期跳)
-          foreach ($pkg in 'wxauto4', 'wxauto') {
-              pip install $pkg
-              if ($LASTEXITCODE -eq 0) { Write-Host "✓ $pkg OK" } else { Write-Host "✗ $pkg SKIP" }
-              $global:LASTEXITCODE = 0
-          }
+          # wxauto4 (开源, 微信 4.x) + 真依赖必装 (PyInstaller spec collect_all 时引用)
+          # wxauto/wxautox/wxautox4 不在 pypi (商业版 plus.wxauto.org), 已移除
+          pip install wxauto4 colorama comtypes pillow psutil pyperclip tenacity
 
       - name: Verify imports work on Windows
         shell: pwsh
         run: |
           python -c "import client.main; print('client.main import OK')"
           python -c "
-          for name in ['wxauto4', 'wxauto', 'uiautomation']:
+          for name in ['wxauto4', 'colorama', 'comtypes', 'PIL', 'psutil', 'pyperclip', 'tenacity', 'uiautomation']:
               try:
                   __import__(name); print(f'{name}: OK')
               except ImportError as e:
