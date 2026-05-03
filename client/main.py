@@ -283,17 +283,76 @@ def main() -> None:
         logger.warning("非 Windows 环境，强制启用 --mock")
         args.mock = True
 
-    # 全局未捕获异常 → 写日志 + 桌面 crash report
+    # 万能版: 启动立即写诊断到桌面 (即使没 crash, 客户也有完整环境快照)
+    try:
+        if sys.platform == 'win32':
+            _desktop = Path(os.environ.get('USERPROFILE', '.')) / 'Desktop'
+        else:
+            _desktop = Path.home() / 'Desktop'
+        _startup_log = _desktop / f'wxagent_startup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
+        # 自动跑 diagnose 收集环境快照
+        _orig_stdout = sys.stdout
+        import io
+        sys.stdout = io.StringIO()
+        try:
+            run_diagnose()
+        except SystemExit:
+            pass
+        except Exception as _e:
+            sys.stdout = _orig_stdout
+            print(f"WARN: 自动诊断失败: {_e}", flush=True)
+        else:
+            _diag_text = sys.stdout.getvalue()
+            sys.stdout = _orig_stdout
+            try:
+                _startup_log.write_text(
+                    f"=== wxagent 启动诊断 {datetime.now().isoformat()} ===\n\n{_diag_text}",
+                    encoding='utf-8'
+                )
+                print(f"启动诊断报告: {_startup_log}", flush=True)
+            except Exception as _e:
+                print(f"WARN: 写桌面诊断失败: {_e}", flush=True)
+    except Exception as _e:
+        print(f"WARN: 启动诊断异常: {_e}", flush=True)
+
+    # 全局未捕获异常 → 写日志 + 桌面 crash report (含完整 diagnose + traceback + 最近 log)
     def _excepthook(exc_type, exc_value, exc_tb):
         tb = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
         logger.critical("未捕获异常:\n%s", tb)
         try:
-            desktop = Path(os.environ.get('USERPROFILE', '.')) / 'Desktop'
+            if sys.platform == 'win32':
+                desktop = Path(os.environ.get('USERPROFILE', '.')) / 'Desktop'
+            else:
+                desktop = Path.home() / 'Desktop'
             crash_file = desktop / f'wxagent_crash_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt'
-            crash_file.write_text(f"crash at {datetime.now()}\n\n{tb}", encoding='utf-8')
-            print(f"\n崩溃报告: {crash_file}", flush=True)
-        except Exception:
-            pass
+            # 收集完整诊断 (调 run_diagnose 把环境快照合进 crash report)
+            try:
+                _orig = sys.stdout
+                sys.stdout = io.StringIO()
+                run_diagnose()
+                _diag = sys.stdout.getvalue()
+                sys.stdout = _orig
+            except Exception:
+                _diag = "(diagnose 失败)"
+            # 最近 log 末 100 行
+            _recent_log = ""
+            try:
+                if LOG_FILE.exists():
+                    _lines = LOG_FILE.read_text(encoding='utf-8', errors='replace').splitlines()
+                    _recent_log = "\n".join(_lines[-100:])
+            except Exception:
+                _recent_log = "(log 读取失败)"
+            crash_file.write_text(
+                f"=== wxagent 崩溃报告 {datetime.now().isoformat()} ===\n\n"
+                f"### 异常 traceback\n{tb}\n\n"
+                f"### 环境诊断快照\n{_diag}\n\n"
+                f"### 最近 100 行 log\n{_recent_log}\n",
+                encoding='utf-8'
+            )
+            print(f"\n崩溃报告 (含完整诊断): {crash_file}", flush=True)
+            print(f"  把这个文件发给技术团队即可定位问题", flush=True)
+        except Exception as _hook_e:
+            print(f"\n崩溃但无法写桌面 crash 报告: {_hook_e}", flush=True)
     sys.excepthook = _excepthook
 
     app = ClientApp(
