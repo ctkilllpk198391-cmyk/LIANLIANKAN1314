@@ -63,7 +63,8 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', 'matplotlib', 'numpy.tests', 'PIL.tests'],
+    # tkinter 不能 exclude — wxauto4 真依赖
+    excludes=['matplotlib', 'numpy.tests', 'PIL.tests'],
     noarchive=False,
     cipher=block_cipher,
 )

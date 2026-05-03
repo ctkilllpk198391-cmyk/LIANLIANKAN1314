@@ -247,20 +247,9 @@ def run_diagnose() -> None:
             except Exception as e:
                 report["env_file"] = {"path": str(cand), "error": str(e)}
             break
-    # 输出
+    # 输出 (桌面文件由外层 startup/crash hook 唯一负责, 避免一次跑生成多个)
     output = json.dumps(report, ensure_ascii=False, indent=2)
     print(output, flush=True)
-    # 写桌面
-    try:
-        if sys.platform == 'win32':
-            desktop = Path(os.environ.get('USERPROFILE', '.')) / 'Desktop'
-        else:
-            desktop = Path.home() / 'Desktop'
-        report_file = desktop / f'wxagent_diagnose_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
-        report_file.write_text(output, encoding='utf-8')
-        print(f"\n诊断报告已写入: {report_file}", flush=True)
-    except Exception as e:
-        print(f"WARN: 无法写桌面诊断: {e}", flush=True)
     # 写 log
     try:
         with open(LOG_FILE, 'a', encoding='utf-8') as f:
