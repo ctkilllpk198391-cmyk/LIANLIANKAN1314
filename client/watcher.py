@@ -46,13 +46,15 @@ class WeChatWatcher:
                 #   - wxauto: pypi 不存在
                 #   - wxautox/wxautox4: 商业付费 plus.wxauto.org
             ]
-            last_err = None
+            errors = []  # 收所有 engine 真错, 失败时全暴露
             for mod_name, desc in engines:
                 try:
                     mod = __import__(mod_name)
                     WeChatCls = getattr(mod, 'WeChat', None)
                     if WeChatCls is None:
-                        logger.warning("引擎 %s 没有 WeChat 类,跳过", mod_name)
+                        msg = f"{mod_name} 模块没 WeChat 类"
+                        logger.error(msg)
+                        errors.append(f"{mod_name}: {msg}")
                         continue
                     logger.info("尝试引擎: %s (%s)", mod_name, desc)
                     self._wx = WeChatCls()
@@ -60,15 +62,16 @@ class WeChatWatcher:
                     logger.info("✅ 微信自动化引擎激活: %s", mod_name)
                     return
                 except ImportError as e:
-                    logger.info("引擎 %s 未安装: %s", mod_name, e)
-                    last_err = e
+                    logger.error("引擎 %s ImportError (依赖缺): %s", mod_name, e)
+                    errors.append(f"{mod_name} ImportError: {e}")
                 except Exception as e:
-                    logger.warning("引擎 %s 初始化失败: %s", mod_name, e)
-                    last_err = e
+                    logger.error("引擎 %s 初始化失败 (微信版本不匹配/微信未运行?): %s", mod_name, e, exc_info=True)
+                    errors.append(f"{mod_name} {type(e).__name__}: {e}")
             raise RuntimeError(
-                "所有微信自动化引擎都不可用。已尝试: " +
-                ", ".join(m for m, _ in engines) +
-                f" · 最后错误: {last_err}"
+                "所有微信自动化引擎都不可用。诊断信息:\n  " +
+                "\n  ".join(errors) +
+                "\n\n常见原因: (1) 微信 PC 未运行 (2) 微信版本 < 4.x (wxauto4 仅支持 4.x) "
+                "(3) Windows 杀毒拦截了 uiautomation"
             )
 
     async def start(self) -> None:
