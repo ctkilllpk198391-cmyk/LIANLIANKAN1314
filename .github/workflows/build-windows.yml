@@ -59,6 +59,24 @@ jobs:
           Write-Host "EXE size:"
           (Get-Item "dist/wechat_agent.exe").Length / 1MB
 
+      - name: Download WeChat 4.0.5.26 installer (SiverKing mirror, wxauto4 supported)
+        shell: pwsh
+        run: |
+          $weixinUrl = "https://github.com/SiverKing/wechat4.0-windows-versions/releases/download/v4.0.5.26/weixin_4.0.5.26.exe"
+          $weixinPath = "dist/weixin_4.0.5.26.exe"
+          Write-Host "Downloading WeChat 4.0.5.26 from SiverKing..."
+          Invoke-WebRequest -Uri $weixinUrl -OutFile $weixinPath -UseBasicParsing
+          if (-not (Test-Path $weixinPath)) {
+            Write-Error "WeChat installer download failed"
+            exit 1
+          }
+          $size = (Get-Item $weixinPath).Length / 1MB
+          Write-Host "WeChat 4.0.5.26 size: $size MB"
+          if ($size -lt 100) {
+            Write-Error "Downloaded WeChat installer too small ($size MB), expected ~191MB"
+            exit 1
+          }
+
       - name: Install Inno Setup via Chocolatey
         shell: pwsh
         run: |
