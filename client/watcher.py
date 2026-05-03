@@ -41,10 +41,9 @@ class WeChatWatcher:
             # wxautox = 商业 Plus 版 for 微信 3.x
             # wxauto = 开源 for 微信 3.x
             engines = [
-                ('wxautox4', '商业 Plus · 微信 4.x'),
                 ('wxauto4',  '开源 · 微信 4.x'),
-                ('wxautox',  '商业 Plus · 微信 3.x'),
                 ('wxauto',   '开源 · 微信 3.x'),
+                # 商业 wxautox/wxautox4 跳过 (要付费授权 plus.wxauto.org)
             ]
             last_err = None
             for mod_name, desc in engines:
