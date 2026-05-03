@@ -35,43 +35,69 @@ class WeChatWatcher:
         if self.mock:
             return
         if self._wx is None:
-            # 多引擎 fallback (按微信版本优先级):
-            # wxautox4 = 商业 Plus 版 for 微信 4.0+(最新)
-            # wxauto4 = 开源 for 微信 4.0
-            # wxautox = 商业 Plus 版 for 微信 3.x
-            # wxauto = 开源 for 微信 3.x
             engines = [
                 ('wxauto4',  '开源 · 微信 4.x'),
-                # wxauto/wxautox/wxautox4 全移除:
-                #   - wxauto: pypi 不存在
-                #   - wxautox/wxautox4: 商业付费 plus.wxauto.org
             ]
-            errors = []  # 收所有 engine 真错, 失败时全暴露
+            # 先做 import 测试: import 失败 = 真 deps 缺, 直接 raise (不可恢复)
+            import_errors = []
+            usable = []
             for mod_name, desc in engines:
                 try:
                     mod = __import__(mod_name)
                     WeChatCls = getattr(mod, 'WeChat', None)
                     if WeChatCls is None:
-                        msg = f"{mod_name} 模块没 WeChat 类"
-                        logger.error(msg)
-                        errors.append(f"{mod_name}: {msg}")
+                        import_errors.append(f"{mod_name}: 模块没 WeChat 类")
                         continue
-                    logger.info("尝试引擎: %s (%s)", mod_name, desc)
+                    usable.append((mod_name, desc, WeChatCls))
+                except ImportError as e:
+                    import_errors.append(f"{mod_name} ImportError: {e}")
+            if not usable:
+                raise RuntimeError(
+                    "微信自动化引擎依赖缺失:\n  " + "\n  ".join(import_errors) +
+                    "\n\n这是打包问题, 请反馈技术团队. 桌面 wxagent_*.txt 已写诊断报告."
+                )
+
+            # 实例化: 失败如果是"主窗口未找到/未登录" → 轮询等微信打开 (用户友好)
+            # 不是 traceback 闪退
+            import time
+            mod_name, desc, WeChatCls = usable[0]
+            print("=" * 60, flush=True)
+            print("⚠️  请确保微信 PC 客户端已打开并登录", flush=True)
+            print("    程序将等待微信启动 (最多 5 分钟)...", flush=True)
+            print("=" * 60, flush=True)
+            logger.info("尝试引擎: %s (%s) · 等待微信主窗口", mod_name, desc)
+            max_retries = 60  # 60 * 5s = 5 min
+            last_err = None
+            for i in range(max_retries):
+                try:
                     self._wx = WeChatCls()
                     self._engine_name = mod_name
-                    logger.info("✅ 微信自动化引擎激活: %s", mod_name)
+                    logger.info("✅ 微信自动化引擎激活: %s (尝试 %d 次)", mod_name, i + 1)
+                    print(f"✅ 微信已连接, 开始监听消息", flush=True)
                     return
-                except ImportError as e:
-                    logger.error("引擎 %s ImportError (依赖缺): %s", mod_name, e)
-                    errors.append(f"{mod_name} ImportError: {e}")
                 except Exception as e:
-                    logger.error("引擎 %s 初始化失败 (微信版本不匹配/微信未运行?): %s", mod_name, e, exc_info=True)
-                    errors.append(f"{mod_name} {type(e).__name__}: {e}")
+                    last_err = e
+                    err_str = str(e)
+                    is_no_window = ('未找到' in err_str or '主窗口' in err_str or
+                                     '登录' in err_str or 'NotFound' in err_str or
+                                     'window' in err_str.lower())
+                    if is_no_window and i < max_retries - 1:
+                        if i % 6 == 0:  # 每 30s 提示一次
+                            print(f"等待微信主窗口... ({i*5}s/{max_retries*5}s) — 请打开微信 PC 客户端并登录", flush=True)
+                        time.sleep(5)
+                        continue
+                    if not is_no_window:
+                        # 非主窗口类错误 (如杀毒拦截), 直接 raise
+                        logger.error("引擎 %s 真实失败: %s", mod_name, e, exc_info=True)
+                        raise RuntimeError(
+                            f"微信自动化引擎 {mod_name} 启动失败:\n  {type(e).__name__}: {e}\n\n"
+                            "常见原因: (1) Windows 杀毒拦截 uiautomation (2) 微信版本 < 4.x (3) 权限不足"
+                        ) from e
+                    time.sleep(5)
+            # 5 min 超时
             raise RuntimeError(
-                "所有微信自动化引擎都不可用。诊断信息:\n  " +
-                "\n  ".join(errors) +
-                "\n\n常见原因: (1) 微信 PC 未运行 (2) 微信版本 < 4.x (wxauto4 仅支持 4.x) "
-                "(3) Windows 杀毒拦截了 uiautomation"
+                f"等待微信主窗口超时 (5 分钟):\n  {last_err}\n\n"
+                "请: (1) 启动微信 PC 客户端 (2) 完成登录 (3) 重新启动本程序"
             )
 
     async def start(self) -> None:
